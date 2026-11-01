@@ -1,6 +1,7 @@
 -- Run from a plugin/Studio tool in an isolated Play client, with the source ModuleScripts in `root` and a
 -- scratch local bridge's {url, key, http_url?} in `pipe`. No account calls or uploads; closes only this test's socket.
-return function(root, pipe)
+-- Set exhaustSlots=true to also verify the Play client's socket-limit diagnostic and recovery when a slot frees.
+return function(root, pipe, exhaustSlots)
 	local Client, Keys, Fallback = require(root.Client), require(root.Keys), require(root.Fallback)
 	local plugin = { GetSetting = function(_, key)
 		return if key == "Autopilot_pipe" then pipe else nil
@@ -16,10 +17,34 @@ return function(root, pipe)
 		return releaseAll()
 	end
 	local client
+	local sockets = {}
 	local ok, result = pcall(function()
+		if exhaustSlots then
+			local http = game:GetService("HttpService")
+			local url = string.gsub(pipe.url, "/v1/bridge.*$", "") .. "/v1/pipe/" .. http:GenerateGUID(false)
+			local exhausted = false
+			for _ = 1, 8 do
+				local made, socket = pcall(function()
+					return http:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, { Url = url })
+				end)
+				if not made then
+					exhausted = string.find(tostring(socket), "Too many", 1, true) ~= nil
+					break
+				end
+				table.insert(sockets, socket)
+			end
+			assert(exhausted and #sockets > 0, "could not occupy the test's WebSocket slots")
+		end
 		client = Client.start(plugin)
 		local host = _G.AutopilotHost
 		local deadline = os.clock() + 6
+		if exhaustSlots then
+			repeat task.wait(.1) until host.link and host.link.problem ~= "" or os.clock() > deadline
+			assert(host.link and string.find(host.link.problem, "cannot use HTTP", 1, true), "missing client diagnostic")
+			assert(not host.link.useHttp and host.link.http == nil, "client must not attempt forbidden HTTP")
+			table.remove(sockets):Close() -- the normal retry must recover without reconnecting manually
+			deadline = os.clock() + 6
+		end
 		repeat task.wait(.1) until host.link and host.link.connected or os.clock() > deadline
 		assert(host.link and host.link.connected, "pipe did not connect")
 		assert(host.link.client, "this case requires the native WebSocket transport")
@@ -45,9 +70,11 @@ return function(root, pipe)
 		assert(humanoid.MoveDirection.Magnitude < .01, "fallback movement stuck")
 		assert(not afterMouse, "camera mouse button stuck")
 		return { detached = true, keyReleaseSent = keyReleased, fallbackReleases = releases,
-			move = humanoid.MoveDirection.Magnitude, mouseBefore = beforeMouse, mouseAfter = afterMouse }
+			move = humanoid.MoveDirection.Magnitude, mouseBefore = beforeMouse, mouseAfter = afterMouse,
+			capacityRecovery = exhaustSlots == true }
 	end)
 	if client then client.stop() end
+	for _, socket in ipairs(sockets) do pcall(function() socket:Close() end) end
 	Keys.send, Fallback.releaseAll = send, releaseAll
 	assert(ok, result)
 	return result

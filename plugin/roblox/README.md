@@ -83,7 +83,7 @@ agent forget them.
 |---|---|
 | **Agent service URL** | Where to connect. Empty means `ws://127.0.0.1:8765/v1/bridge`. A changed address is used at once. |
 | **Access token** · optional | Sent as `Authorization: Bearer <token>`, for an agent service that asks for one. |
-| **HTTP fallback URL** | Optional HTTP base URL (for example `http://127.0.0.1:9000/v1/http/` with `autopilot serve --http-port 9000`). Empty uses the WebSocket port plus one. Applies to all DataModels. |
+| **HTTP fallback URL** | Optional HTTP base URL (for example `http://127.0.0.1:9000/v1/http/` with `autopilot serve --http-port 9000`). Empty uses the WebSocket port plus one. Used by the editor and Play server; see the client limitation below. |
 | **Data sharing** | Synchronized with the agent service’s shared privacy preference before runs. Changes are saved for every editor; an existing opt-out is preserved. |
 
 ### Runs from your own Claude Code or Codex
@@ -114,8 +114,8 @@ session's **server** and its player's **client**. They can't reach each other in
   ServerScriptService, a LocalScript in the player's PlayerScripts) through which it reads and calls the game's
   ModuleScripts: a plugin's own `require` runs a module again for the plugin alone, not the game's copy;
 - **sockets**: Studio lets each DataModel have only four WebSocket clients, every plugin's counted. The edit plugin
-  needs one; when none is free it talks to the agent service over plain HTTP instead (long polls on the port after the
-  WebSocket's: `autopilot serve` listens there too). A play session's client can make no HTTP requests at all (only a
+  needs one; when none is free it talks to the agent service over plain HTTP instead (long polls at the configured
+  HTTP fallback URL, defaulting to the next port after the WebSocket's). A play session's client can make no HTTP requests at all (only a
   server can), so it needs one free WebSocket.
 
 Findings and errors come from both sides: each runs its own detectors on its own log and physics.
@@ -205,6 +205,9 @@ answer's `omitted`): `held`, `scene.sun`, `openings`, `ways_up`, `lane`, slope e
   (`bench/run_autopilot.py`) need another engine.
 - **One level.** A place is one level; teleporting between a universe's places isn't played.
 - **One player.** A play session has one player (Studio's local multiplayer test isn't driven).
+- **Client WebSocket capacity.** Roblox forbids HTTP requests from a Play client, including plugins. The editor and
+  Play server can fall back to HTTP when their WebSocket slots are occupied, but the client needs one free slot.
+  If all four are occupied, Autopilot reports this in Studio's Output and retries until a slot becomes available.
 
 ## Security
 
@@ -273,6 +276,8 @@ harness in the Play server. It checks native CFrame round trips, duplicate paths
 detach cleanup without account access. `tests/client_disconnect.luau` returns a function taking the source module
 folder and a scratch local bridge's pipe settings; run it in the Play client to check a real WebSocket closure
 releases keyboard, fallback movement, and camera inputs. Use dummy settings and credentials for integration tests.
+Pass `true` as its third argument to also occupy the client's WebSocket slots, check its diagnostic, free one slot,
+and verify automatic recovery without manually reconnecting.
 
 1. Open a Baseplate in Studio with the plugin (built or from the dev loader), and build the test game into it:
    paste `tests/testgame.luau` into the command bar (or `python tools/roblox_dev.py eval - <

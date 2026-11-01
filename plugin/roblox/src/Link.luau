@@ -1,13 +1,14 @@
 --!strict
 -- A connection out to the brain (or to a pipe through it), carrying JSON frames (autopilot/bridge.py). It is a
--- WebSocket (HttpService:CreateWebStreamClient) when the DataModel has one to spare, else plain HTTP (the bridge's
--- HTTP_PATH: long polls for what the brain sends, POSTs for what the plugin sends, at httpUrl or the next port):
+-- WebSocket (HttpService:CreateWebStreamClient) when the DataModel has one to spare, else HTTP in the editor/server
+-- (the bridge's HTTP_PATH: long polls for what the brain sends, POSTs for what the plugin sends, at httpUrl or the next port):
 -- Studio lets each DataModel have four WebSockets, every plugin's counted, so another plugin may have taken them. While
 -- wanted it reconnects with a backoff (1 s doubling to 15 s).
 --   local link = Link.new(url, token, httpUrl)
 --   link.onOpen = function() ... end; link.onFrame = function(frame) ... end; link.onClose = function(wasOpen) ... end
 --   link:open(); link:send(frame); link:close()
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 
 local Json = require(script.Parent.Json)
 
@@ -144,6 +145,18 @@ function Link:_connect()
 	note("ws " .. self.url .. " -> " .. (if ok then "made" else tostring(client)))
 	if not ok then
 		if string.find(tostring(client), "Too many", 1, true) then
+			if not RunService:IsEdit() and RunService:IsClient() then
+				-- Roblox forbids RequestAsync in a Play client, including a plugin's. Retry WebSocket so
+				-- freeing a slot recovers automatically instead of switching permanently to unusable HTTP.
+				local problem = "Studio's play client has no WebSocket slot available and cannot use HTTP. "
+					.. "Close an unused plugin connection to free a slot; Autopilot will retry."
+				if self.problem ~= problem then
+					warn("[Autopilot] " .. problem)
+				end
+				self.problem = problem
+				self:_retry(gen)
+				return
+			end
 			-- (the DataModel's WebSockets are taken, by other plugins too: HTTP instead, from now on)
 			self.useHttp = true
 			self:_connectHttp(gen)
