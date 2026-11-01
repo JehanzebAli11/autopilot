@@ -11,6 +11,7 @@ verify claims about it and reach goals in it.
 | `{stem}-Unreal<x.y>-Mac.dmg` | Unreal Engine x.y (5.4-5.8) on macOS, Apple silicon or Intel (prebuilt too) |
 | `{stem}-Unity.zip` | Unity 6 (6000.0 or later) on Windows or macOS |
 | `{stem}-Godot.zip` | Godot 4.7 or later on Windows or macOS |
+| `{stem}-Roblox.zip` | Roblox Studio on Windows or macOS |
 
 `SHA256SUMS.txt` lists the downloads' hashes. Installing the agent service needs the internet once.
 
@@ -39,16 +40,28 @@ verify claims about it and reach goals in it.
 2. Enable **Autopilot** in Project > Project Settings > Plugins. Its dock appears on the right.
 3. Commit the autoload and project id (`autopilot/project_id`) it adds to `project.godot`.
 
+### Roblox Studio
+
+1. Unzip the download. Install the agent service once: run `agent_service/install.ps1` (Windows: right-click > Run
+   with PowerShell) or `sh agent_service/install.sh` (macOS) from the unzipped folder. A Roblox plugin can't run
+   programs, so it can't install or start the agent service for you.
+2. Copy `Autopilot.rbxmx` into Studio's Plugins folder: `%LOCALAPPDATA%\Roblox\Plugins` on Windows,
+   `~/Documents/Roblox/Plugins` on macOS (Studio's Plugins tab > Plugins Folder opens it).
+3. Before each session, start the agent service in a terminal: `autopilot serve`.
+4. Open your place. The **Autopilot** dock appears on the right (Plugins > Autopilot) and connects by itself. Keep
+   Studio's game view focused while a run plays: Roblox takes no keyboard input while Studio isn't the focused window.
+
 ### Updating
 
 Put the new download's plugin in place of the old one (Unreal: replace `Plugins/Autopilot/`; Unity: install the new
-tarball as above; Godot: replace `addons/autopilot/`), then open the project. The plugin installs the agent service it
+tarball as above; Godot: replace `addons/autopilot/`; Roblox: replace `Autopilot.rbxmx` and run the new installer),
+then open the project. The plugin installs the agent service it
 carries over an older one, and stops an older one that is still running, by itself.
 
 ### Uninstalling
 
-1. In Autopilot, go to Settings and click Uninstall. By default, Autopilot keeps your project's memories; you can choose to delete memories instead (this is a destructive action).
-2. Remove the plugin from each project: Unreal, close the editor and delete `Plugins/Autopilot/`; Unity, remove the Autopilot package in the Package Manager; Godot, disable Autopilot in Project > Project Settings > Plugins, then delete `addons/autopilot/`.
+1. In Autopilot, go to Settings and click Uninstall (Roblox Studio: run `autopilot uninstall` in a terminal). By default, Autopilot keeps your project's memories; you can choose to delete memories instead (this is a destructive action).
+2. Remove the plugin from each project: Unreal, close the editor and delete `Plugins/Autopilot/`; Unity, remove the Autopilot package in the Package Manager; Godot, disable Autopilot in Project > Project Settings > Plugins, then delete `addons/autopilot/`; Roblox, delete `Autopilot.rbxmx` from Studio's Plugins folder.
 
 ## First-run setup
 

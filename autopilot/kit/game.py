@@ -1,7 +1,7 @@
 """The game, as harness code sees it: reads of any object (privileged), and the player's inputs (keys, mouse, Enhanced
 Input actions, UI clicks). Everything goes over the plugin's bridge (bridge.Link, docs/protocol.md). How things are
-found and read depends on the game's engine (autopilot.engines: Unreal, Unity, Godot); positions are in the kit's frame
-(Unreal's) whatever the engine.
+found and read depends on the game's engine (autopilot.engines: Unreal, Unity, Godot, Roblox); positions are in the
+kit's frame (Unreal's) whatever the engine.
 
 Reads are synchronous; `game.batch([...])` sends several at once so they resolve in one game frame. Inputs are
 fire-and-forget. Held keys are leased: the plugin lets go of a key that isn't renewed, so a crashed harness never

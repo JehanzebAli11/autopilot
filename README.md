@@ -4,7 +4,7 @@
 
 ![Aura by Ramen](./assets/aura-logo.png)
 
-Autopilot is a continually learning real-time general playtesting system. It supports Unreal Engine 5, Unity 6, and Godot 4 on both Windows and MacOS.
+Autopilot is a continually learning real-time general playtesting system. It supports Unreal Engine 5, Unity 6, Godot 4 and Roblox Studio on both Windows and MacOS.
 
 Install Autopilot into your project and let it learn your game, explore your levels, and improve its gameplay run after run.
 
@@ -31,6 +31,11 @@ You can find the installation instructions in the [Autopilot docs](https://www.t
    1. Unzip the download. Move `autopilot/` into your project's `addons/` folder.
    2. Open your project. Enable Autopilot in Project > Project Settings > Plugins. The Autopilot dock appears on the right.
 
+   **Roblox Studio**
+   1. Put `Autopilot.rbxmx` in Studio's Plugins folder (`%LOCALAPPDATA%\Roblox\Plugins` on Windows, `~/Documents/Roblox/Plugins` on macOS), or from a clone run `python tools/build_roblox.py --install`.
+   2. Start the agent service in a terminal: `autopilot serve` (a Roblox plugin can't start it for you).
+   3. Open your place. The Autopilot dock appears on the right (Plugins > Autopilot toggles it) and connects by itself. See [plugin/roblox](plugin/roblox/README.md).
+
 3. Follow the Autopilot setup flow.
    1. We recommend using Autopilot with your Aura account. Click `Create Account` if you don't yet have an Aura account, or `Sign in` if you are a returning user.
    2. Autopilot runs its setup, and finally redirects you to the signup/signin page. Complete your signin/signup process.
@@ -55,7 +60,7 @@ Once that has completed, follow the Autopilot setup flow as shown in Step 3 of [
 
 ## Usage
 
-The main way to use Autopilot is through the **Autopilot plugin** in your editor. This works in Unreal Engine 5, Unity 6, and Godot 4 on both Windows and MacOS. This path uses your Aura plan, or your BYOK API keys.
+The main way to use Autopilot is through the **Autopilot plugin** in your editor. This works in Unreal Engine 5, Unity 6, Godot 4 and Roblox Studio on both Windows and MacOS. This path uses your Aura plan, or your BYOK API keys.
 
 Alternative ways to use Autopilot include:
 
@@ -76,7 +81,7 @@ Your first few runs allow Autopilot to learn about your game as it gradually pop
 ## Uninstallation
 
 1. In Autopilot, go to Settings and click Uninstall. By default, Autopilot keeps your project's memories; you can choose to delete memories instead (this is a destructive action).
-2. Remove the plugin from each project: Unreal, close the editor and delete `Plugins/Autopilot/`; Unity, remove the Autopilot package in the Package Manager; Godot, disable Autopilot in Project > Project Settings > Plugins, then delete `addons/autopilot/`.
+2. Remove the plugin from each project: Unreal, close the editor and delete `Plugins/Autopilot/`; Unity, remove the Autopilot package in the Package Manager; Godot, disable Autopilot in Project > Project Settings > Plugins, then delete `addons/autopilot/`; Roblox, delete `Autopilot.rbxmx` from Studio's Plugins folder.
 
 ---
 

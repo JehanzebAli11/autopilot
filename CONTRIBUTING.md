@@ -16,7 +16,7 @@ Autopilot from a clone, what the tests cover, and how changes are reviewed and r
 
 - Python 3.12+, pip, and [uv](https://docs.astral.sh/uv/)
 - [Bun](https://bun.sh)
-- A project in Unreal 5 (5.4-5.8), Unity 6, or Godot 4 (4.7 or later)
+- A project in Unreal 5 (5.4-5.8), Unity 6, Godot 4 (4.7 or later), or a place in Roblox Studio
 
 ## Development setup
 
@@ -45,11 +45,12 @@ The Python tests use a simulated game (`tests/conftest.py`, `tests/navsim.py`), 
    | Unreal 5 | [plugin/unreal/Autopilot](plugin/unreal/Autopilot/README.md)                       | copy the folder into your project's `Plugins/` and reopen the project |
    | Unity 6  | [plugin/unity/com.ramenvr.autopilot](plugin/unity/com.ramenvr.autopilot/README.md) | Package Manager > _Add package from disk_ > its `package.json`        |
    | Godot 4  | [plugin/godot](plugin/godot/README.md)                                             | copy `addons/autopilot` into your project and enable it               |
+   | Roblox   | [plugin/roblox](plugin/roblox/README.md)                                           | `python tools/build_roblox.py --install`, then reopen the place       |
 
 2. **Start Autopilot:** `autopilot serve` (or `python -m autopilot serve`). It waits for the plugin on
    `ws://127.0.0.1:8765/v1/bridge`.
 3. **Open Autopilot** in your editor (Unreal: the orange Autopilot icon; Unity: Window > Autopilot; Godot: the
-   Autopilot dock) and go through the first-run setup, as in the [README](README.md#installing-pre-built-packages)'s
+   Autopilot dock; Roblox Studio: the Autopilot dock, Plugins > Autopilot) and go through the first-run setup, as in the [README](README.md#installing-pre-built-packages)'s
    step 3.
 4. **Prompt Autopilot.** A prompt is one of four types (see the [README](README.md#usage)): an exploration ("Explore
    the crafting system in Lvl_Main"), a test ("Go through the currently open level and tell me everything that looks
@@ -78,7 +79,8 @@ first). Without `-PluginsDir` it only builds: copy `dist\Autopilot\` into `Plugi
 ## Command line
 
 ```bash
-autopilot serve                              # run what the editor's Autopilot tab starts
+autopilot serve                              # run what the editor's Autopilot tab starts (--port, default 8765;
+                                             # --http-port, default the next one: plugins that talk HTTP, Roblox's)
 autopilot play "Verify that ..."             # run one prompt when the plugin connects, exit with its result
 autopilot codex --project path/to/Game       # build a project's codex without the game running
 autopilot run memory/<project>/runs/<run>/harness.py --seconds 90   # replay a saved harness (no language model)
@@ -149,7 +151,7 @@ The variables:
 | `AUTOPILOT_SHARE`                                        | `1`                                                                                                             | `0`: never share runs' data, whatever the plugin says                                                                                                                                                                        |
 | `AUTOPILOT_TRAINING_URL`                                 | Aura's                                                                                                          | where shared runs' data is sent                                                                                                                                                                                              |
 | `AUTOPILOT_INSPECT`                                      | (off)                                                                                                           | `1` sends each decision to an editor's policy log even when the editor is on another machine                                                                                                                                 |
-| `AUTOPILOT_UNREAL`, `AUTOPILOT_UNITY`, `AUTOPILOT_GODOT` | the usual install places                                                                                        | the engine to run headless games and exports with                                                                                                                                                                            |
+| `AUTOPILOT_UNREAL`, `AUTOPILOT_UNITY`, `AUTOPILOT_GODOT` | the usual install places                                                                                        | the engine to run headless games and exports with (Roblox has none: its games run only in Studio)                                                                                                                            |
 
 ## Repository layout
 
@@ -171,10 +173,10 @@ The variables:
 | `autopilot/telemetry.py`, `autopilot/media.py`, `autopilot/training.py`, `autopilot/redact.py` | a run's usage and data: model calls, recording and stills, shared once redacted                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `autopilot/aura.py`, `autopilot/aura_login.py`, `autopilot/aura_memory.py`                     | runs through Aura, its sign-in and the memory kept with it                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `autopilot/uninstall.py`                                                                       | `autopilot uninstall`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `plugin/`                                                                                      | the Unreal (`unreal/Autopilot`), Unity (`unity/com.ramenvr.autopilot`) and Godot (`godot/addons/autopilot`) plugins, each with a README giving its source map and how to build and test it; and `claude-code/`: Autopilot's Claude Code plugin (listed in `.claude-plugin/marketplace.json`)                                                                                                                                                                                                                              |
+| `plugin/`                                                                                      | the Unreal (`unreal/Autopilot`), Unity (`unity/com.ramenvr.autopilot`), Godot (`godot/addons/autopilot`) and Roblox Studio (`roblox`) plugins, each with a README giving its source map and how to build and test it; and `claude-code/`: Autopilot's Claude Code plugin (listed in `.claude-plugin/marketplace.json`)                                                                                                                                                                                                                              |
 | `packaging/standalone/`                                                                        | the downloads' installers and README                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `bench/`                                                                                       | runs a suite of prompts against a headless copy of a game and scores it                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `tools/`                                                                                       | `package_release.py`, which makes the downloads, `release.py`, which publishes them as a GitHub Release, and `check_download.py`, `engine_smoke.py`, `uninstall_e2e.py`, which try them; `build_unreal.ps1`, the Unreal plugin for any engine build; `fresh_setup.py`, to see the first-run setup again; `probe.py` and `rc.py`, for looking into a running game by hand; `net_smoke.py`, a multiplayer Unreal game; `training_data.py`, which reads runs' data; `relay_latency.py`, what Aura's relay adds to a decision |
+| `tools/`                                                                                       | `package_release.py`, which makes the downloads, `release.py`, which publishes them as a GitHub Release, and `check_download.py`, `engine_smoke.py`, `uninstall_e2e.py`, which try them; `build_unreal.ps1`, the Unreal plugin for any engine build; `build_roblox.py`, the Roblox Studio plugin as one `.rbxmx`, and `roblox_dev.py`, its development loop in Studio; `fresh_setup.py`, to see the first-run setup again; `probe.py` and `rc.py`, for looking into a running game by hand; `net_smoke.py`, a multiplayer Unreal game; `training_data.py`, which reads runs' data; `relay_latency.py`, what Aura's relay adds to a decision |
 | `tests/`                                                                                       | the Python tests (no engine needed): `pytest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 `autopilot/bridge.py` and the plugins' link code are the contract between the plugins and Autopilot. A change to a
@@ -207,7 +209,9 @@ Supporting another engine takes two parts:
 
 1. **A plugin** that speaks the protocol (`autopilot/bridge.py`): it connects out to Autopilot, answers the requests
    (the engine-neutral ops and the kit frame the other plugins answer), sends events, and exports the project's code.
-   The Unity and Godot plugins are the best models.
+   The Unity and Godot plugins are the best models. A plugin whose parts can't reach each other inside the engine
+   (Roblox Studio's edit, server and client DataModels) joins them through the brain's pipe, and one that can't keep a
+   WebSocket open talks HTTP (both in `autopilot/bridge.py`).
 2. **An adapter** in `autopilot/engines/`: a subclass of `OpEngine` (`autopilot/engines/base.py`) that knows the project's
    layout, which files go into the codex, how to convert coordinates, how to launch the game headless, and the
    engine's section of the kit reference (`<engine>.md`). Register it in `autopilot/engines/__init__.py` and add tests
