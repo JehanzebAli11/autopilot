@@ -2,8 +2,8 @@
 (docs/protocol.md, "Account").
 
     account frame     {"type": "account", "mode": "aura"|"own_keys"|"none", "email"?, "signed_in", "keys": {...},
-                      "llm_provider", "bill"?, "out_of_credits"?}: sent after every welcome, after a sign-in or
-                      sign-out, after a run through Aura, and when the plugin asks ("account"). "keys" are the BYOK
+                      "llm_provider", "share_data", "bill"?, "out_of_credits"?}: sent after every welcome, sign-in,
+                      sign-out, run through Aura, and when the plugin asks ("account"). "keys" are the BYOK
                       keys, masked, and "llm_provider" whose LLM key "llm" is ("anthropic" or "openai"). With Aura,
                       "bill" is what Aura billed for Autopilot this billing period ({"usd", "runs", "from", "to"}, or
                       null until Aura says), and "out_of_credits" Aura's words when the team has no credits left for a
@@ -16,7 +16,10 @@
                       "keys": {"decision"?, "llm"?}}: the first-run setup's choices, from a plugin that can't write the
                       files below itself (Roblox Studio's plugins have no file access), saved here as the other
                       plugins save them; answered {"type": "setup_saved", "ok", "message"?}, then the account frame.
-                      Only from this machine
+                      Only from this machine. Saved credentials and access mode apply before the next run;
+                      saving and reporting them never changes an active run's environment
+    save_preferences  {"type": "save_preferences", "share": bool}: explicitly change the saved sharing preference
+                      from a local editor; answered {"type": "preferences_saved", "ok", "message"?}, then account
 
 The plugin never holds Aura's tokens: the sign-in is this agent service's, kept for the computer
 (Autopilot/aura-session.json), so every editor's Autopilot and every `autopilot serve` use it.
@@ -278,17 +281,18 @@ def llm_keys(provider):
 
 def state():
     """The account frame."""
-    follow_preferences()
-    access = preferences().get("access")
+    prefs = preferences()
+    access = prefs.get("access")
     saved = user_settings()  # (the next run's keys: the setup's, else the environment's)
     setting = lambda name: saved.get(name) or os.environ.get(name)
     provider = llm_provider(saved)
     frame = {"type": "account", "keys": {"decision": masked(setting("TYPESAFE_API_KEY")),
                                          "llm": masked(next(filter(None, map(setting, llm_keys(provider))), None))},
-             "coding_agent": coding_agent(saved), "llm_provider": provider}
+             "coding_agent": coding_agent(saved), "llm_provider": provider,
+             "share_data": prefs.get("share_data") is not False}
     # A kept sign-in is told whatever the mode: the plugin's first-run setup signs in before it records the choice
     kept = aura_login.saved(server())
-    if aura.enabled() or access == "aura":
+    if _fixed or (aura.enabled() and not _from_preferences) or access == "aura":
         signed_in = bool(kept) or aura.app_running()
         frame.update(mode="aura", signed_in=signed_in, email=(kept or {}).get("email"),
                      bill=bill() if signed_in else None, out_of_credits=out_of_credits() if signed_in else None)
@@ -428,6 +432,15 @@ def _set_env_lines(path, values):
         os.chmod(path, 0o600)
 
 
+def _save_preferences(changes):
+    prefs = {**preferences(), **changes}
+    path = _preferences_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(prefs, f, indent=1)
+    os.replace(path + ".tmp", path)
+
+
 def save_setup(frame):
     """Save the first-run setup's choices a plugin sends (save_setup, above): preferences.json (onboarded, share_data,
     access; its other keys kept) and, for BYOK, autopilot.env's AUTOPILOT_AGENT, AUTOPILOT_OPENCODE_PROVIDER (OpenCode
@@ -457,19 +470,12 @@ def save_setup(frame):
     try:
         if env:
             _set_env_lines(_user_env_path(), env)
-        prefs = preferences()
-        prefs.update(version=1, onboarded=True, access=access)
+        changes = dict(version=1, onboarded=True, access=access)
         if isinstance(frame.get("share"), bool):
-            prefs["share_data"] = frame["share"]
-        path = _preferences_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(prefs, f, indent=1)
-        os.replace(path + ".tmp", path)
+            changes["share_data"] = frame["share"]
+        _save_preferences(changes)
     except OSError as e:
         return False, f"couldn't write the settings: {e}"
-    load_user_settings()
-    follow_preferences()
     return True, None
 
 
@@ -478,13 +484,25 @@ def handle(link, frame, sign_in):
     kind = frame.get("type")
     if kind == "account":
         send_state(link)
-    elif kind == "save_setup":
-        if getattr(link, "loopback", None) is False:
+    elif kind in ("save_setup", "save_preferences"):
+        if getattr(link, "loopback", None) is not True:
             ok, why = False, "the setup is saved only for an editor on this computer"
+        elif kind == "save_preferences":
+            if not isinstance(frame.get("share"), bool):
+                ok, why = False, "share must be a boolean"
+            else:
+                try:
+                    _save_preferences({"share_data": frame["share"]})
+                    ok, why = True, None
+                except OSError as e:
+                    ok, why = False, f"couldn't write the settings: {e}"
         else:
             ok, why = save_setup(frame)
+        if ok and isinstance(frame.get("share"), bool) and getattr(link, "hello", None) is not None:
+            link.hello["share"] = frame["share"]
         try:
-            link.send({"type": "setup_saved", "ok": ok, **({"message": why} if why else {})})
+            reply = "setup_saved" if kind == "save_setup" else "preferences_saved"
+            link.send({"type": reply, "ok": ok, **({"message": why} if why else {})})
         except Exception:
             pass
         send_state(link)

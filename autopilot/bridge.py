@@ -411,7 +411,9 @@ PIPE_MEMBERS = 8
 
 def pipe_send(state, key, text, but=None):
     """Send a frame's text to every part on a pipe (but `but`)."""
-    for other in list(state["pipes"].get(key, ())):
+    with state["pipes_lock"]:
+        members = list(state["pipes"].get(key, ()))
+    for other in members:
         if other is not but:
             try:
                 other.send(text)
@@ -424,11 +426,14 @@ def pipe(ws, key, state):
     if not key or len(key) > 128 or not is_loopback(getattr(ws, "remote_address", None) or ()):
         ws.close(1008, "a pipe takes a key, from this machine")
         return
-    members = state["pipes"].setdefault(key, [])
-    if len(members) >= PIPE_MEMBERS:
+    with state["pipes_lock"]:
+        members = state["pipes"].setdefault(key, [])
+        full = len(members) >= PIPE_MEMBERS
+        if not full:
+            members.append(ws)
+    if full:
         ws.close(1008, "too many on this pipe")
         return
-    members.append(ws)
     try:
         for message in ws:
             link = state["sessions"].get(key)
@@ -454,9 +459,10 @@ def pipe(ws, key, state):
     except Exception:
         pass  # (closed without a close frame: the play session ended)
     finally:
-        members.remove(ws)
-        if not members:
-            state["pipes"].pop(key, None)
+        with state["pipes_lock"]:
+            members.remove(ws)
+            if not members:
+                state["pipes"].pop(key, None)
 
 
 # A plugin that can't keep a WebSocket open (Roblox Studio lets each of its DataModels have four, every plugin's
@@ -565,6 +571,8 @@ def serve_http(host, port, handler, state):
             return url.path, {k: v[0] for k, v in parse_qs(url.query).items()}
 
         def do_GET(self):
+            if self.headers.get("Origin") is not None:
+                return self._answer(403, '{"error": "native plugins only"}')
             path, q = self._parts()
             peer = peers.get(q.get("peer"))
             if path != HTTP_PATH + "poll":
@@ -578,6 +586,8 @@ def serve_http(host, port, handler, state):
             self._answer(200, "[" + ",".join(texts) + "]")
 
         def do_POST(self):
+            if self.headers.get("Origin") is not None:
+                return self._answer(403, '{"error": "native plugins only"}')
             path, q = self._parts()
             n = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(n) if n else b""
@@ -638,7 +648,7 @@ def serve_local(host="127.0.0.1", port=8765, wait=None, role="cli", announce_as=
     from websockets.sync.server import serve
 
     ready = queue.Queue()
-    state = {"current": None, "sessions": {}, "pipes": {}}
+    state = {"current": None, "sessions": {}, "pipes": {}, "pipes_lock": threading.Lock()}
 
     def handler(ws):
         path = str(getattr(getattr(ws, "request", None), "path", "") or "")
@@ -713,7 +723,7 @@ def serve_local(host="127.0.0.1", port=8765, wait=None, role="cli", announce_as=
         link.close(why)
         state["sessions"].pop(link.session, None)  # (no longer resumable)
 
-    server = serve(handler, host, port, max_size=None)
+    server = serve(handler, host, port, max_size=None, origins=[None])
     threading.Thread(target=server.serve_forever, daemon=True).start()
     http = None
     if http_port is not None:

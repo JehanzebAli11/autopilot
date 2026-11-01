@@ -45,6 +45,12 @@ def sharing(hello):
     (AUTOPILOT_SHARE=0). A run through Aura also needs the user's Aura account to allow it (autopilot/training.py)."""
     if (os.environ.get("AUTOPILOT_SHARE") or "").strip() == "0":
         return False
+    if (hello or {}).get("engine") == "roblox":
+        from . import account
+
+        # Studio cannot read preferences.json; its cached hello must never override a saved opt-out.
+        if account.preferences().get("share_data") is False:
+            return False
     return (hello or {}).get("share", True) is not False
 
 

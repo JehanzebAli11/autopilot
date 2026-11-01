@@ -217,15 +217,22 @@ function Keys.moveMouse(delta: Vector2): boolean
 	return ok
 end
 
--- Once a frame: let go of the right button held for turning once the turns have stopped.
-function Keys.tick()
-	if turning.held and os.clock() > turning.releaseAt then
+-- Also called on detach: ticking stops when the host disconnects.
+function Keys.releaseTurn()
+	if turning.held then
 		turning.held = false
 		if not rightHeld then
 			pcall(function()
 				vi():SendMouseButton(Keys.mouseAt(), Enum.UserInputType.MouseButton2, false, 1)
 			end)
 		end
+	end
+end
+
+-- Once a frame: let go of the right button held for turning once the turns have stopped.
+function Keys.tick()
+	if os.clock() > turning.releaseAt then
+		Keys.releaseTurn()
 	end
 end
 

@@ -7,7 +7,8 @@ local Settings = {}
 local DEFAULTS = {
 	url = "", -- the agent service's address ("": ws://127.0.0.1:8765/v1/bridge, `autopilot serve` on this computer)
 	token = "", -- a bearer token, for an agent service that asks for one
-	share = true, -- share runs' data to improve Autopilot (the hello's `share`)
+	http_url = "", -- optional HTTP fallback base URL, including /v1/http/
+	share = false, -- share runs' data to improve Autopilot (the hello's `share`)
 	time_limit = 30, -- the composer's Time limit, in minutes
 	autoconnect = true, -- connect when a place opens
 }

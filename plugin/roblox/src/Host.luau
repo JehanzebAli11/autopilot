@@ -131,32 +131,37 @@ function Host:_onFrame(frame: any)
 		end
 		self:send({ to = "edit", type = "ready", t = self:t(), place = game.Name })
 	elseif kind == "detach" then
-		self.attached = false
-		self.events = {}
-		if self.onDetach then
-			self.onDetach()
-		end
+		self:_detach()
 	elseif kind == "who" then
 		-- (the editor asks who is there: a side it hasn't attached says so, an attached one that it is still there)
 		self:send({ to = "edit", type = if self.attached then "alive" else "here", t = self:t(), place = game.Name })
 	end
 end
 
--- Join the editor's pipe once its settings say where (looked at every second until then, and again when they change:
--- the editor connected to another brain).
+-- Release input immediately; detached hosts no longer tick their input leases.
+function Host:_detach()
+	self.attached = false
+	self.events = {}
+	if self.onDetach then
+		self.onDetach()
+	end
+end
+
+-- Join the editor's pipe once its settings say where, and again when they change.
 function Host:_join()
 	task.spawn(function()
 		while self.alive do
 			local pipe = Settings.pipe(self.plugin)
-			local key = if pipe then tostring(pipe.url) .. "#" .. tostring(pipe.key) else ""
+			local key = if pipe then tostring(pipe.url) .. "#" .. tostring(pipe.key) .. "#" .. tostring(pipe.http_url) else ""
 			if pipe and key ~= self.pipeKey then
 				self.pipeKey = key
 				if self.link then
+					self:_detach()
 					self.link:close()
 				end
 				local url = string.gsub(tostring(pipe.url), "/v1/bridge.*$", "") .. "/v1/pipe/" .. tostring(pipe.key)
 					.. "?dm=" .. self.side
-				local link = Link.new(url, "")
+				local link = Link.new(url, "", pipe.http_url)
 				link.onOpen = function()
 					-- (the editor attaches us when it is told we are here)
 					link:send({ type = "here", to = "edit", from = self.side, t = self:t(), place = game.Name })
@@ -165,7 +170,7 @@ function Host:_join()
 					self:_onFrame(frame)
 				end
 				link.onClose = function()
-					self.attached = false
+					self:_detach()
 				end
 				self.link = link
 				link:open()
@@ -205,9 +210,7 @@ function Host:stop()
 	for _, c in ipairs(self.conns) do
 		c:Disconnect()
 	end
-	if self.onDetach then
-		self.onDetach()
-	end
+	self:_detach()
 	if self.link then
 		self.link:close()
 	end

@@ -11,8 +11,9 @@
   the server changed it (replication).
 - **Things are instances**, named by their paths from the DataModel: `/Workspace/Map/Door`, `/ReplicatedStorage/
   Modules/Config`, `/ServerScriptService/GameManager`, `/Players/<Name>/leaderstats/Coins`. Instances that share a name
-  under one parent are numbered: the first is plain (`Coin`), the others `Coin@1`, `Coin@2`..., and each keeps its
-  number while it lives (a collected coin's path is gone, never another coin's). `game.name_of(path)` is the last part.
+  under one parent all get their debug-ID suffix, for example `Coin@617854` and `Coin@617860`, not sequential
+  indices. Use the exact paths returned by discovery; do not invent suffixes. A plain duplicate name resolves to
+  the lowest debug ID. `game.name_of(path)` is the last part.
   `LocalPlayer`, `Character`, `Humanoid` and `Camera` name the player's own.
 - **Finding things**: `game.actors("Model")` / `game.actors("BasePart")` (a Roblox class, subclasses too),
   `game.actors("tag:Enemy")` (a CollectionService tag; a plain name that is a tag and no class works too), or the name

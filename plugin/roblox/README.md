@@ -83,7 +83,8 @@ agent forget them.
 |---|---|
 | **Agent service URL** | Where to connect. Empty means `ws://127.0.0.1:8765/v1/bridge`. A changed address is used at once. |
 | **Access token** · optional | Sent as `Authorization: Bearer <token>`, for an agent service that asks for one. |
-| **Data sharing** | Whether runs' data is shared to improve Autopilot (the hello's `share`; on by default). |
+| **HTTP fallback URL** | Optional HTTP base URL (for example `http://127.0.0.1:9000/v1/http/` with `autopilot serve --http-port 9000`). Empty uses the WebSocket port plus one. Applies to all DataModels. |
+| **Data sharing** | Synchronized with the agent service’s shared privacy preference before runs. Changes are saved for every editor; an existing opt-out is preserved. |
 
 ### Runs from your own Claude Code or Codex
 
@@ -211,6 +212,11 @@ The agent can call functions and set properties in the running game, so connect 
 The plugin only connects out, to the address you set (by default this computer), and does nothing in a play session
 until the edit plugin is connected. The play session's helper script exists only while a session runs.
 
+The local bridge and development server accept native clients without an `Origin` header and reject browser
+origins. This prevents browser cross-origin control; it does not authenticate other local processes. Keep these
+listeners on loopback. Setup changes are saved immediately and applied to model credentials and access mode at
+the next run.
+
 ## Removing it
 
 Delete `Autopilot.rbxmx` from Studio's Plugins folder. Its settings and run history stay in Studio's plugin settings
@@ -260,6 +266,13 @@ settings by `dev/DevRelay.luau`, which only the dev server's bundle carries.
 
 The Python tests (`tests/test_roblox.py`, in `pytest`) check the adapter and the plugin's sources and build without
 Studio (with `luau-compile` on PATH, also that every module compiles). The live tests need Studio:
+
+For focused regressions, load `src/` as ModuleScripts under `ServerStorage.UnitTest.Modules` and
+`tests/Regressions_Test.luau` under `UnitTest.Cases` in a new, unsaved Baseplate. Run it with Studio's unit-test
+harness in the Play server. It checks native CFrame round trips, duplicate paths, privacy synchronization, and
+detach cleanup without account access. `tests/client_disconnect.luau` returns a function taking the source module
+folder and a scratch local bridge's pipe settings; run it in the Play client to check a real WebSocket closure
+releases keyboard, fallback movement, and camera inputs. Use dummy settings and credentials for integration tests.
 
 1. Open a Baseplate in Studio with the plugin (built or from the dev loader), and build the test game into it:
    paste `tests/testgame.luau` into the command bar (or `python tools/roblox_dev.py eval - <

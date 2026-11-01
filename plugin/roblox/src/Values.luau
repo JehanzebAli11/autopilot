@@ -196,7 +196,8 @@ local function toCFrame(v: any, current: CFrame?): CFrame?
 	local look = toVector3(field(v, "look", "LookVector"))
 	local euler = field(v, "euler")
 	if look and look.Magnitude > 1e-6 then
-		return CFrame.lookAt(pos, pos + look)
+		local up = toVector3(field(v, "up", "UpVector")) or base.UpVector
+		return CFrame.lookAt(pos, pos + look, up)
 	elseif type(euler) == "table" then
 		return CFrame.new(pos) * CFrame.fromEulerAnglesYXZ(num(euler.x, 0), num(euler.y, 0), num(euler.z, 0))
 	end

@@ -148,9 +148,8 @@ def snapshot():
     return out
 
 
-def serve():
-    dev = Dev()
-
+def handler_for(dev):
+    """Native Studio/CLI HTTP requests only; loopback alone does not exclude web pages."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -172,6 +171,8 @@ def serve():
             return json.loads(self.rfile.read(n) or b"null")
 
         def do_GET(self):
+            if self.headers.get("Origin") is not None:
+                return self._answer({"error": "native clients only"}, 403)
             path, q = self._query()
             if path == "/poll":
                 # (nobundle: the edit DataModel's relay for the client, which has the bundle already)
@@ -182,27 +183,36 @@ def serve():
                 self._answer({"error": "not found"}, 404)
 
         def do_POST(self):
+            if self.headers.get("Origin") is not None:
+                return self._answer({"error": "native clients only"}, 403)
             path, q = self._query()
             if path == "/up":
                 dev.up(q.get("dm", "?"), self._body() or [])
                 self._answer({})
             elif path == "/ctl":
+                if self.headers.get_content_type() != "application/json":
+                    return self._answer({"error": "expected application/json"}, 415)
                 req = self._body() or {}
                 self._answer(dev.eval(req.get("dm") or "edit", req.get("code", ""), float(req.get("timeout", 30))))
             else:
                 self._answer({"error": "not found"}, 404)
 
+    return Handler
+
+
+def serve():
+    dev = Dev()
     from websockets.sync.server import serve as ws_serve
 
     def socket(ws):
         dm = ws.request.path.split("dm=", 1)[-1] if "dm=" in ws.request.path else "client"
         dev.pump(dm, ws)
 
-    sockets = ws_serve(socket, "127.0.0.1", WS_PORT, max_size=None)
+    sockets = ws_serve(socket, "127.0.0.1", WS_PORT, max_size=None, origins=[None])
     threading.Thread(target=sockets.serve_forever, daemon=True).start()
     threading.Thread(target=dev.watch, daemon=True).start()
     print(f"Serving {SRC} on http://127.0.0.1:{PORT} and ws://127.0.0.1:{WS_PORT}/dev (log: {LOG})", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", PORT), handler_for(dev)).serve_forever()
 
 
 def ctl(req, timeout=40):

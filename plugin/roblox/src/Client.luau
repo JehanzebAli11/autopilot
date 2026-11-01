@@ -44,6 +44,7 @@ function Client.start(plugin: Plugin)
 			end
 		end
 		table.clear(held)
+		Keys.releaseTurn()
 		Fallback.releaseAll()
 	end
 

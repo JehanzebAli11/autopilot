@@ -1,10 +1,10 @@
 --!strict
 -- A connection out to the brain (or to a pipe through it), carrying JSON frames (autopilot/bridge.py). It is a
 -- WebSocket (HttpService:CreateWebStreamClient) when the DataModel has one to spare, else plain HTTP (the bridge's
--- HTTP_PATH: long polls for what the brain sends, POSTs for what the plugin sends, on the port after the WebSocket's):
+-- HTTP_PATH: long polls for what the brain sends, POSTs for what the plugin sends, at httpUrl or the next port):
 -- Studio lets each DataModel have four WebSockets, every plugin's counted, so another plugin may have taken them. While
 -- wanted it reconnects with a backoff (1 s doubling to 15 s).
---   local link = Link.new(url, token)
+--   local link = Link.new(url, token, httpUrl)
 --   link.onOpen = function() ... end; link.onFrame = function(frame) ... end; link.onClose = function(wasOpen) ... end
 --   link:open(); link:send(frame); link:close()
 local HttpService = game:GetService("HttpService")
@@ -42,10 +42,11 @@ export type Link = {
 	[string]: any,
 }
 
-function Link.new(url: string?, token: string?): Link
+function Link.new(url: string?, token: string?, httpUrl: string?): Link
 	local self = setmetatable({}, Link) :: any
 	self.url = if url and url ~= "" then url else Link.DEFAULT_URL
 	self.token = token or ""
+	self.httpUrl = httpUrl or ""
 	self.connected = false
 	self.role = "" -- the brain's role from its welcome ("" until welcomed)
 	self.problem = "" -- what went wrong last, in words
@@ -187,6 +188,9 @@ end
 
 function Link:_connectHttp(gen: number)
 	local base, path = Link.httpOf(self.url)
+	if self.httpUrl ~= "" then
+		base = string.gsub(self.httpUrl, "/+$", "") .. "/"
+	end
 	self.http = { base = base, peer = nil, outbox = {}, sending = false }
 	local http = self.http
 	task.spawn(function()
@@ -302,12 +306,15 @@ function Link:close()
 end
 
 -- Connect again now (a changed address, the user's Reconnect).
-function Link:reconnect(url: string?, token: string?)
+function Link:reconnect(url: string?, token: string?, httpUrl: string?)
 	if url then
 		self.url = if url ~= "" then url else Link.DEFAULT_URL
 	end
 	if token then
 		self.token = token
+	end
+	if httpUrl ~= nil then
+		self.httpUrl = httpUrl
 	end
 	self.refused = false
 	self:open()

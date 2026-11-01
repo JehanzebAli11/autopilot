@@ -15,7 +15,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local StarterGui = game:GetService("StarterGui")
 local StarterPlayer = game:GetService("StarterPlayer")
 
-for _, old in ipairs({ workspace:FindFirstChild("Grove"), ReplicatedStorage:FindFirstChild("GameState"),
+for _, old in pairs({ workspace:FindFirstChild("Grove"), ReplicatedStorage:FindFirstChild("GameState"),
 	ReplicatedStorage:FindFirstChild("Remotes"), ServerScriptService:FindFirstChild("GroveService"),
 	StarterGui:FindFirstChild("HUD"), StarterGui:FindFirstChild("Menu"),
 	StarterPlayer.StarterPlayerScripts:FindFirstChild("GroveControls") }) do

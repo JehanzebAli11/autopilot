@@ -217,6 +217,9 @@ def test_the_plugin_compiles():
     exe = shutil.which("luau-compile")
     if not exe:
         pytest.skip("no luau-compile on PATH")
-    for name in sorted(_sources()):
-        r = subprocess.run([exe, "--text", os.path.join(SRC, name + ".luau")], capture_output=True, text=True)
-        assert r.returncode == 0, f"{name}: {r.stdout[-500:]}{r.stderr[-500:]}"
+    paths = [os.path.join(SRC, name + ".luau") for name in sorted(_sources())]
+    cases = os.path.join(ROOT, "plugin", "roblox", "tests")
+    paths += [os.path.join(cases, name) for name in sorted(os.listdir(cases)) if name.endswith(".luau")]
+    for path in paths:
+        r = subprocess.run([exe, "--text", path], capture_output=True, text=True)
+        assert r.returncode == 0, f"{path}: {r.stdout[-500:]}{r.stderr[-500:]}"

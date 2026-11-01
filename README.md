@@ -33,7 +33,7 @@ You can find the installation instructions in the [Autopilot docs](https://www.t
 
    **Roblox Studio**
    1. Put `Autopilot.rbxmx` in Studio's Plugins folder (`%LOCALAPPDATA%\Roblox\Plugins` on Windows, `~/Documents/Roblox/Plugins` on macOS), or from a clone run `python tools/build_roblox.py --install`.
-   2. Start the agent service in a terminal: `autopilot serve` (a Roblox plugin can't start it for you).
+   2. For a prebuilt download, install its agent service first: run `agent_service/install.ps1` on Windows or `sh agent_service/install.sh` on macOS from the unzipped folder. Then start `autopilot serve` in a terminal (a Roblox plugin cannot install or start it).
    3. Open your place. The Autopilot dock appears on the right (Plugins > Autopilot toggles it) and connects by itself. See [plugin/roblox](plugin/roblox/README.md).
 
 3. Follow the Autopilot setup flow.

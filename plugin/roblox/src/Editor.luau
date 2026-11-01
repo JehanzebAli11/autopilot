@@ -58,12 +58,13 @@ end
 function Editor.new(plugin: Plugin)
 	local self = setmetatable({}, Editor) :: any
 	self.plugin = plugin
-	self.link = Link.new(Settings.get(plugin, "url"), Settings.get(plugin, "token"))
+	self.link = Link.new(Settings.get(plugin, "url"), Settings.get(plugin, "token"), Settings.get(plugin, "http_url"))
 	self.session = nil -- the brain's session for this connection: the pipe's key
 	self.runActive = false
 	self.brainSteers = false
 	self.brainAccount = false
 	self.brainSetup = false
+	self.privacyReady = false
 	self.memory = { known = false, runs = 0, notes = false, lib = false }
 	self.account = {}
 	self.sides = {} -- side -> {ready = bool, seen = os.clock()}
@@ -117,11 +118,14 @@ function Editor:connected(): boolean
 end
 
 function Editor:connect()
-	self.link:reconnect(Settings.get(self.plugin, "url"), Settings.get(self.plugin, "token"))
+	self.privacyReady = false
+	self.link:reconnect(Settings.get(self.plugin, "url"), Settings.get(self.plugin, "token"),
+		Settings.get(self.plugin, "http_url"))
 	self:status("Connecting to " .. self.link.url .. "…")
 end
 
 function Editor:disconnect()
+	self.privacyReady = false
 	self.link:close()
 	self.link.problem = ""
 	self.runActive = false
@@ -148,7 +152,7 @@ function Editor:_hello()
 	local h: any = { type = "hello", protocol = Link.PROTOCOL, plugin_version = Editor.VERSION, engine = "roblox",
 		engine_version = version(), project = self:projectName(), host = "editor", inspect = true,
 		-- `levels` and `timed_hold`; no `media`: a plugin gets no picture of the game in Studio
-		features = { "levels", "timed_hold" }, share = Settings.get(self.plugin, "share") ~= false,
+		features = { "levels", "timed_hold" }, share = self.privacyReady and Settings.get(self.plugin, "share") ~= false,
 		place_id = game.PlaceId, universe_id = game.GameId, transport = self.link.transport }
 	local pid = self:projectId()
 	if pid then
@@ -177,6 +181,7 @@ function Editor:_respondError(id: any, err: string, status: number?)
 end
 
 function Editor:_onClosed(was: boolean)
+	self.privacyReady = false
 	self.runActive = false
 	self:_fire("run", false)
 	self:_endPipe()
@@ -193,6 +198,10 @@ end
 function Editor:startRun(run: any): boolean
 	if not self:connected() then
 		self:status("Not connected: connect first")
+		return false
+	end
+	if not self.privacyReady then
+		self:status("Waiting for the agent service’s privacy settings; update the service if this persists")
 		return false
 	end
 	self:_send({ type = "start", run = run })
@@ -260,11 +269,19 @@ end
 -- The first-run setup's choices, for an agent service that saves them for the plugin (its welcome's "setup"):
 -- {"access": "aura"|"own_keys", "share", "keys": {...}, "coding_agent", "llm_provider"}.
 function Editor:saveSetup(setup: any): boolean
-	if not (self:connected() and self.brainSetup) then
+	if not (self:connected() and self.brainSetup and self.privacyReady) then
 		return false
 	end
 	setup.type = "save_setup"
 	return self.link:send(setup)
+end
+
+function Editor:setSharing(share: boolean): boolean
+	if not (self:connected() and self.privacyReady) then
+		self:status("Connect to synchronize privacy settings first")
+		return false
+	end
+	return self.link:send({ type = "save_preferences", share = share })
 end
 
 -- --- frames from the brain -----------------------------------------------------------------------------------------
@@ -345,10 +362,22 @@ function Editor:_onBrainFrame(frame: any)
 		self:_fire("bill", frame)
 	elseif kind == "account" then
 		self.account = frame
+		if type(frame.share_data) == "boolean" then
+			local changed = not self.privacyReady or Settings.get(self.plugin, "share") ~= frame.share_data
+			Settings.set(self.plugin, "share", frame.share_data)
+			self.privacyReady = true
+			if changed then
+				self:_hello() -- update the hello without interrupting an active run
+			end
+		end
 		self:_fire("account", frame)
 	elseif kind == "aura_sign_in" then
 		self.signInFrame = frame -- (the latest: what the dock shows, and what is asked again)
 		self:_fire("sign_in", frame)
+	elseif kind == "preferences_saved" then
+		if not frame.ok then
+			self:status("Privacy setting not saved: " .. tostring(frame.message or ""))
+		end
 	elseif kind == "setup_saved" then
 		self:_fire("setup_saved", frame)
 	elseif kind == "error" then
@@ -585,7 +614,7 @@ end
 function Editor:_startPipe(session: string)
 	self:_endPipe()
 	self.session = session
-	Settings.set(self.plugin, "pipe", { url = self.link.url, key = session })
+	Settings.set(self.plugin, "pipe", { url = self.link.url, key = session, http_url = self.link.httpUrl })
 	-- (sides already playing say so when asked)
 	self:_pipeSend({ to = "play", type = "who" })
 end

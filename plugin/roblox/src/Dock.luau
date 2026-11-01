@@ -289,6 +289,7 @@ function Dock.new(plugin: Plugin, editor: any, _options: any?)
 			end
 		end
 		self:_renderAccount()
+		self:_renderSettings()
 	end)
 	editor:on("sign_in", function(f)
 		self.signIn = f
@@ -299,7 +300,7 @@ function Dock.new(plugin: Plugin, editor: any, _options: any?)
 		self:_renderAccount()
 	end)
 	editor:on("setup_saved", function(f)
-		self:_status(if f.ok then "Saved: runs use your keys" else ("Not saved: " .. tostring(f.message or "")))
+		self:_status(if f.ok then "Saved: applies to the next run" else ("Not saved: " .. tostring(f.message or "")))
 		editor:askAccount()
 	end)
 	editor:on("bill", function(f)
@@ -1040,27 +1041,28 @@ function Dock:_renderSettings()
 	label(s, "SETTINGS", { font = MONO, size = 12, color = C.muted })
 	local url = input(s, "Agent service URL (empty: ws://127.0.0.1:8765/v1/bridge)", { mono = true,
 		text = Settings.get(self.plugin, "url") or "" })
+	local httpUrl = input(s, "HTTP fallback URL (empty: next port after WebSocket)", { mono = true,
+		text = Settings.get(self.plugin, "http_url") or "" })
 	local token = input(s, "Access token · optional", { mono = true, text = Settings.get(self.plugin, "token") or "" })
 	local function apply()
-		local changed = url.Text ~= (Settings.get(self.plugin, "url") or "") or token.Text ~= (Settings.get(self.plugin,
-			"token") or "")
+		local changed = httpUrl.Text ~= (Settings.get(self.plugin, "http_url") or "")
+			or url.Text ~= (Settings.get(self.plugin, "url") or "")
+			or token.Text ~= (Settings.get(self.plugin, "token") or "")
+		Settings.set(self.plugin, "http_url", httpUrl.Text)
 		Settings.set(self.plugin, "url", url.Text)
 		Settings.set(self.plugin, "token", token.Text)
 		if changed and not self.editor.runActive then
 			self.editor:connect()
 		end
 	end
+	httpUrl.FocusLost:Connect(apply)
 	url.FocusLost:Connect(apply)
 	token.FocusLost:Connect(apply)
 	local row = frame(s, "Share", true)
 	local share = Settings.get(self.plugin, "share") ~= false
 	label(row, "Share runs to improve Autopilot", { width = 0, size = 14 })
 	button(row, if share then "Data sharing on" else "Data sharing off", function()
-		Settings.set(self.plugin, "share", not share)
-		self:_renderSettings()
-		if self.editor:connected() and not self.editor.runActive then
-			self.editor:connect() -- (the hello carries it)
-		end
+		self.editor:setSharing(not share)
 	end)
 	label(s, "Enabling this sends agent traces and memories to the developers of Autopilot. Roblox Studio gives the "
 		.. "plugin no picture of the game, so runs have no recording.", { color = C.muted, size = 13 })
