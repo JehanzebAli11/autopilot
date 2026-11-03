@@ -815,7 +815,7 @@ function O.view(a)
 				if center then
 					local dist = (center - eye).Magnitude
 					local p, on = cam:WorldToViewportPoint(center)
-					if dist <= maxDist and p.Z > 0 and on then
+					if dist <= maxDist and p.Z > 0 and on and vp.X > 0 and vp.Y > 0 then
 						local hit = workspace:Raycast(eye, center - eye, params)
 						if not hit or hit.Instance == inst or hit.Instance:IsDescendantOf(inst) then
 							local crossOn = crossHit ~= nil

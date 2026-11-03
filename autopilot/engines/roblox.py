@@ -492,7 +492,8 @@ class StudioBackend:
         self.findings_seen = set()
         self.lock = threading.Lock()
         self.stopped = threading.Event()
-        threading.Thread(target=self._input_worker, name="roblox-inputs", daemon=True).start()
+        self.input_thread = threading.Thread(target=self._input_worker, name="roblox-inputs", daemon=True)
+        self.input_thread.start()
         threading.Thread(target=self._lease_worker, name="roblox-leases", daemon=True).start()
 
     # -- answering ------------------------------------------------------------------------------------------
@@ -559,7 +560,10 @@ class StudioBackend:
 
     def wait_for_inputs(self, seconds=5.0):
         """Wait until the inputs posted so far have gone to Studio (a read after a key press sees the press, as
-        within one frame of a plugin's game); whether they all had."""
+        within one frame of a plugin's game); whether they all had. An input's own reads (a pointer at a world point)
+        don't wait: they come from the input thread itself."""
+        if threading.current_thread() is self.input_thread:
+            return True
         deadline = time.monotonic() + seconds
         with self.inputs_done:
             while self.inputs_pending > 0:
@@ -583,6 +587,7 @@ class StudioBackend:
 
     def luau(self, op, args=None, datamodel=None):
         model = datamodel or self.datamodel(args)
+        self.wait_for_inputs()  # (on the caller's thread: the input thread's own reads go at once)
         try:
             result, t = self.reads.submit(model, op, args or {})
         except mcp.McpError:
@@ -592,7 +597,6 @@ class StudioBackend:
         return result
 
     def _run_batch(self, datamodel, ops):
-        self.wait_for_inputs()
         code = luau_chunk(ops, self.player, self.nonce, self.echo)
         text = self.studio.execute_luau(code, datamodel=datamodel)
         got = parse_answer(text, self.nonce)
@@ -703,9 +707,16 @@ class StudioBackend:
         return {"levels": [place], "open": place, "playing": place if self.is_running() else ""}
 
     def place_name(self):
+        """The place's name: its Rojo project's or file's, else the name Studio gives it (game.Name, without a file
+        extension), else "place"."""
         if self.project:
             return self.engine.project_name(self.project)
-        return getattr(self, "_place", "") or "place"
+        if not self._place:
+            try:
+                self._place = str((self.luau("context", {}, "Edit") or {}).get("place") or "")
+            except (OpFailed, mcp.McpError):
+                pass
+        return re.sub(r"\.rbxlx?$", "", self._place, flags=re.I) or "place"
 
     def op_timestep(self, args):
         raise OpFailed(501, "Roblox: no fixed time step through Studio's MCP server")
@@ -721,7 +732,7 @@ class StudioBackend:
         if "player" in args:
             self.player = str(args.get("player") or "")
         c = self.luau("context", {})
-        if c.get("place"):
+        if c.get("place") and not self._place:
             self._place = c["place"]
         vp = c.get("viewport") or {}
         if vp.get("x") and vp.get("y"):
@@ -848,7 +859,8 @@ class StudioBackend:
                     if Vec.of(a["location"]).dist(Vec.of(b["location"])) > moved and (o, "moved") not in found:
                         found.add((o, "moved"))
                         changes.append({"t": self.t, "object": o, "what": "moved"})
-                    if (Vec.of(a["extent"]) - Vec.of(b["extent"])).length > 1.0 and (o, "size") not in found:
+                    if (a.get("extent") and b.get("extent") and (o, "size") not in found
+                            and (Vec.of(a["extent"]) - Vec.of(b["extent"])).length > 1.0):
                         found.add((o, "size"))
                         changes.append({"t": self.t, "object": o, "what": "changed size"})
         return {"changes": changes}
