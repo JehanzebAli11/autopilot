@@ -5,11 +5,14 @@
         [--codex memory/<project>/codex] [--warm <memory dir>] [--minutes 30] [--out <dir>] [--model ...]
         [--agent opencode|claude|codex]
 
---project is any engine's project: an Unreal .uproject, a Unity project folder or a Godot project folder. The game
-runs headless as its engine's adapter says (Engine.launch_command): Unreal `-game -nullrhi` (or a packaged build given
-with --engine <Game.exe>); Unity a player build given with --engine <Game.exe> (`-batchmode -nographics`); Godot
-`--headless --path <folder>` (or an exported build given with --engine <Game.exe>). --engine: the engine's (or the
-build's) executable, when not the adapter's default.
+--project is any engine's project: an Unreal .uproject, a Unity project folder, a Godot project folder, or a Roblox
+place (a Rojo project folder or a .rbxl/.rbxlx). The game runs headless as its engine's adapter says
+(Engine.launch_command): Unreal `-game -nullrhi` (or a packaged build given with --engine <Game.exe>); Unity a player
+build given with --engine <Game.exe> (`-batchmode -nographics`); Godot `--headless --path <folder>` (or an exported
+build given with --engine <Game.exe>). Roblox has no headless game: the bench starts the Roblox connector
+(autopilot/engines/roblox.py), which plays the place open in Roblox Studio through Studio's MCP server, so Studio must
+be open on it and prompts run one at a time (--parallel 1). --engine: the engine's (or the build's) executable, when
+not the adapter's default.
 
 A suite is a JSON file: {"prompts": [{"id": "A", "prompt": "...", "expected": "CONFIRMED"}, ...]} ("expected" is
 optional; bench/example.json shows the format).
@@ -72,6 +75,9 @@ def run_one(item, args, root):
                AUTOPILOT_TIMEOUT=str(int(args.minutes * 60)))
     settings = os.path.join(work, "settings")  # (bridge.brain_file's base: the game keeps the real one, for its DDC)
     os.makedirs(settings)
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        # (Roblox Studio's MCP server is started from the real one: %LOCALAPPDATA%\Roblox\mcp.bat)
+        env.setdefault("AUTOPILOT_ROBLOX_LOCALAPPDATA", os.environ["LOCALAPPDATA"])
     env["LOCALAPPDATA" if os.name == "nt" else "XDG_CONFIG_HOME"] = settings
     if args.model:
         env["AUTOPILOT_MODEL"] = args.model
@@ -86,7 +92,8 @@ def run_one(item, args, root):
     game = subprocess.Popen(
         eng.launch_command(path, f"ws://127.0.0.1:{port}/v1/bridge", os.path.join(work, "game.log"), map=args.map,
                            exe=args.engine) + fps_cap(eng, args.fps),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **processes.GROUP)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env if eng.name == "roblox" else None,
+        cwd=HERE if eng.name == "roblox" else None, **processes.GROUP)
     processes.track(game)
     try:
         # (a run's budget starts once the game is up, over a minute from here: the wait has to outlast it, or a run
@@ -150,7 +157,7 @@ def main():
     args = p.parse_args()
     args.engine_of, args.project_path = engines.find_project(args.project)
     if not args.engine_of:
-        sys.exit(f"no Unreal, Unity or Godot project at {args.project}")
+        sys.exit(f"no Unreal, Unity, Godot or Roblox project at {args.project}")
     try:  # (an engine whose headless launch isn't there yet says so before anything starts)
         args.engine_of.launch_command(args.project_path, "ws://127.0.0.1:0/v1/bridge", "game.log", map=args.map,
                                       exe=args.engine)
@@ -168,7 +175,7 @@ def main():
     if args.only:
         keep = set(args.only.split(","))
         items = [i for i in items if i["id"] in keep]
-    if args.warm:
+    if args.warm or args.engine_of.name == "roblox":  # (Roblox: one Studio, one play session at a time)
         args.parallel = 1
     root = args.out or os.path.join(HERE, "bench", "results", time.strftime("%Y%m%d-%H%M%S"))
     os.makedirs(root, exist_ok=True)
