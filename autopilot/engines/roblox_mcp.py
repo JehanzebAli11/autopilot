@@ -184,7 +184,10 @@ def command(env=None):
     env = os.environ if env is None else env
     given = (env.get(ENV_CMD) or "").strip()
     if given:
-        return shlex.split(given, posix=os.name != "nt")
+        if os.name != "nt":
+            return shlex.split(given)
+        # (Windows: backslashes are path separators, not escapes; a quoted part, a path with spaces, loses its quotes)
+        return [p[1:-1] if len(p) >= 2 and p[0] == p[-1] == '"' else p for p in shlex.split(given, posix=False)]
     cmd = default_command(env=env)
     if not cmd:
         raise McpError(f"no Roblox Studio MCP server on {sys.platform}: set {ENV_CMD} to the command that starts it")
