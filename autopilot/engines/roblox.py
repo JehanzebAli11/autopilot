@@ -1498,7 +1498,11 @@ def main(argv=None):
     project = Roblox().project_at(args.project) if args.project else None
     if args.project and not project:
         log(f"note: no Rojo project or place file at {args.project}: playing what Studio has open")
-    studio = mcp.Studio.connect()
+    try:
+        studio = mcp.Studio.connect()
+    except mcp.McpError as e:
+        log(str(e))
+        return 2
     lacking = studio.check()
     for tool, why in lacking.items():
         log(f"note: Studio's MCP server has no {tool}: {why}")

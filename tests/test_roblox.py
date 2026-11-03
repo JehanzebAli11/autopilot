@@ -581,3 +581,27 @@ def test_the_bench_suite_is_in_the_bench_format():
                                                              "not_achieved")
     words = " ".join(p["prompt"].lower() for p in prompts)
     assert "lever" in words and "coin" in words and "final checkpoint" in words
+
+
+def test_the_latency_tool_runs_against_the_fake(capsys):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("roblox_latency", os.path.join(HERE, "..", "tools",
+                                                                                 "roblox_latency.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    assert tool.main(["--fake", "--calls", "10"]) == 0
+    out = capsys.readouterr().out
+    assert "p50" in out and "p95" in out and "tempo <=" in out and "n=10" in out
+    assert tool.recommend(100, 150) == (6.7, 3.3)  # (150 ms: about 3 decisions a second, too slow for reflexes)
+    assert tool.recommend(10, 20) == (30.0, 8.0)
+    assert tool.percentile([5, 1, 4, 2, 3], 50) == 3
+
+
+def test_the_connector_says_why_it_cant_start(monkeypatch, capsys):
+    import sys
+
+    fake = f'"{sys.executable}" -m autopilot.engines.roblox_mcp --fake --without execute_luau'
+    monkeypatch.setenv(mcp.ENV_CMD, fake)
+    assert roblox.main(["connect", "--url", "ws://127.0.0.1:9/v1/bridge", "--retry", "0"]) == 2
+    assert "doesn't offer execute_luau" in capsys.readouterr().out
