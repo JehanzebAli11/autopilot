@@ -605,3 +605,10 @@ def test_the_connector_says_why_it_cant_start(monkeypatch, capsys):
     monkeypatch.setenv(mcp.ENV_CMD, fake)
     assert roblox.main(["connect", "--url", "ws://127.0.0.1:9/v1/bridge", "--retry", "0"]) == 2
     assert "doesn't offer execute_luau" in capsys.readouterr().out
+
+
+def test_the_luau_prelude_ships_with_the_package():
+    """An installed Autopilot reads a place with engines/roblox.luau: it is package data, as the engines' .md are."""
+    with open(os.path.join(HERE, "..", "pyproject.toml"), encoding="utf-8") as f:
+        assert '"engines/*.luau"' in f.read()
+    assert os.path.isfile(roblox.PRELUDE_FILE)
