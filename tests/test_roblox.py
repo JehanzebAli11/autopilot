@@ -293,6 +293,9 @@ def test_the_mouse_turns_the_camera_and_calibrates(playing):
 
 def test_pointer_clicks_ui_and_navigation(playing):
     game, link, backend, place = playing
+    t0 = time.monotonic()
+    game.pointer(world=Vec(560, 280, 56))  # (an input whose own read must not wait behind itself)
+    assert time.monotonic() - t0 < 2
     p = game.pointer(0.5, 0.5)
     assert p["x"] == pytest.approx(960) and p["on_screen"]
     game.press("LeftMouseButton")
@@ -307,6 +310,18 @@ def test_pointer_clicks_ui_and_navigation(playing):
         {"type": "click", "button": "left", "instance_path": "game.Players.Hero.PlayerGui.Hud.Reset"}]
     game.request("move", {"to": Vec(280, 560, 84).ue()})
     assert place.calls[-1] == (mcp.CHARACTER_NAVIGATION, None, {"target_position": {"x": 20.0, "y": 3.0, "z": -10.0}})
+
+
+def test_watch_sees_a_thing_move(playing):
+    game, link, backend, place = playing
+
+    def nudge():
+        time.sleep(0.2)
+        place.things["Workspace/Coin"]["at"] = [10, 2, -40]
+
+    threading.Thread(target=nudge, daemon=True).start()
+    out = game.request("watch", {"objects": ["Workspace/Coin", "Workspace/Door"], "seconds": 1.2})
+    assert [(c["object"], c["what"]) for c in out["changes"]] == [("Workspace/Coin", "moved")]
 
 
 def test_no_named_actions_and_no_pause(playing):
@@ -343,6 +358,14 @@ def test_restart_is_stop_then_start(place):
     with pytest.raises(GameError, match="plays the place open in Studio"):
         game.restart(map="SomeOtherPlace")
     assert link.request("levels") == {"levels": ["TestPlace"], "open": "TestPlace", "playing": ""}
+
+
+def test_the_hello_names_the_place_studio_has_open(place):
+    game, link, backend = connect(place)
+    assert link.hello["project"] == "TestPlace" and link.hello["engine"] == "roblox"  # (game.Name, in Edit)
+    studio = mcp.Studio.connect(mcp.LocalTransport(place.server()))
+    rojo = roblox.LocalLink(roblox.StudioBackend(studio, project=os.path.abspath(TESTPLACE)))
+    assert rojo.hello["project"] == "Autopilot Test Place"  # (a Rojo project's own name)
 
 
 def test_studio_state_is_read_when_the_connector_doesnt_know(place):
