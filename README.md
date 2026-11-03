@@ -104,6 +104,12 @@ To do a clean uninstall of Autopilot, do the following steps:
    - **Unity**: Remove the Autopilot package in the Package Manager.
    - **Godot**: Disable Autopilot in **Project > Project Settings > Plugins**, then delete `addons/autopilot/`.
 
+## Roblox (experimental)
+
+Autopilot can play a Roblox place through Roblox Studio's built-in MCP server: no plugin inside Studio, a small
+connector process instead. It is new and has not yet been verified against a live Studio. [docs/roblox.md](docs/roblox.md)
+explains how to set it up, how to measure its latency, and what it can't do yet.
+
 ## Contributing
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up a development environment, run the tests, and add support for a new engine. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
