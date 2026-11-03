@@ -642,8 +642,8 @@ def strip_line_numbers(text):
 
 
 def dot_path(path):
-    """An engine path (Workspace/Level/Door, see roblox.luau) as Studio's dot path (game.Workspace.Level.Door), for
-    the tools that take one. A same-named sibling's index (Coin@2) has no dot form: it is dropped."""
+    """An engine path (Workspace/Level/Gate, see roblox.luau) as Studio's dot path (game.Workspace.Level.Gate), for
+    the tools that take one. A same-named sibling's index (Gem@2) has no dot form: it is dropped."""
     import re
 
     parts = [re.sub(r"(?<!\\)@\d+$", "", p).replace("\\/", "/").replace("\\@", "@").replace("\\\\", "\\")
