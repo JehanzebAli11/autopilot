@@ -37,5 +37,6 @@ plugin/unreal/Autopilot/Intermediate/
 .DS_Store
 Thumbs.db
 
-# Bench results
+# Bench results, and autopilot evolve's experiments log (docs/evolve.md)
 bench/results/
+bench/evolve/
