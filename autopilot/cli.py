@@ -832,7 +832,7 @@ def answer_again(link, hello, done):
 def cmd_codex(args):
     eng, path = engines.find_project(args.path)
     if not eng:
-        print(f"No Unreal, Unity or Godot project at {args.path}")
+        print(f"No Unreal, Unity, Godot or Roblox project at {args.path}")
         return 1
     project = args.name or eng.project_name(path)
     remember_project(project, path, eng)
@@ -1079,7 +1079,8 @@ SERVER_HELP = f"the Aura server (default: AUTOPILOT_AURA_URL, else AUTOPILOT_AUR
 def parser():
     ap = argparse.ArgumentParser(prog="autopilot", description="Automated playtesting for Unreal, Unity and Godot.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    project_help = "the game's project on this machine: a .uproject, a Unity project folder or a project.godot"
+    project_help = ("the game's project on this machine: a .uproject, a Unity project folder, a project.godot, or a "
+                    "Roblox place (a Rojo project folder or a .rbxl/.rbxlx)")
     s = sub.add_parser("serve", help="run what the editor's Autopilot tab starts")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--project", dest="path", help=project_help)
