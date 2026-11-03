@@ -1,0 +1,69 @@
+{
+  "className": "ScreenGui",
+  "properties": {
+    "ResetOnSpawn": false
+  },
+  "children": [
+    {
+      "name": "Score",
+      "className": "TextLabel",
+      "properties": {
+        "Text": "Points: 0",
+        "Position": [[0, 16], [0, 16]],
+        "Size": [[0, 220], [0, 32]],
+        "TextScaled": true
+      }
+    },
+    {
+      "name": "Play",
+      "className": "TextLabel",
+      "properties": {
+        "Text": "",
+        "Position": [[0, 16], [0, 56]],
+        "Size": [[0, 220], [0, 32]],
+        "TextScaled": true
+      }
+    },
+    {
+      "name": "Message",
+      "className": "TextLabel",
+      "properties": {
+        "Text": "",
+        "Visible": false,
+        "Position": [[0.5, -220], [0, 96]],
+        "Size": [[0, 440], [0, 48]],
+        "TextScaled": true
+      }
+    },
+    {
+      "name": "Power",
+      "className": "Frame",
+      "properties": {
+        "Position": [[0.5, -150], [1, -64]],
+        "Size": [[0, 300], [0, 24]],
+        "BackgroundColor3": [0.15, 0.15, 0.15]
+      },
+      "children": [
+        {
+          "name": "Fill",
+          "className": "Frame",
+          "properties": {
+            "Size": [[0, 0], [1, 0]],
+            "BackgroundColor3": [1, 0.75, 0.2],
+            "BorderSizePixel": 0
+          }
+        },
+        {
+          "name": "Label",
+          "className": "TextLabel",
+          "properties": {
+            "Text": "Power: hold to charge",
+            "BackgroundTransparency": 1,
+            "Size": [[1, 0], [1, 0]],
+            "TextScaled": true
+          }
+        }
+      ]
+    }
+  ]
+}
