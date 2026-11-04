@@ -1,5 +1,7 @@
 # Evolve and regression replay
 
+[runbook.md](runbook.md) walks through a first real run on Roblox, step by step.
+
 Two tools for working on Autopilot itself (from a clone, not an installed copy):
 
 - **`autopilot evolve`**: an autoresearch loop. It changes one piece of Autopilot at a time, measures the change on a

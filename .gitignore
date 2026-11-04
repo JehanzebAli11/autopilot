@@ -40,3 +40,4 @@ Thumbs.db
 # Bench results, and autopilot evolve's experiments log (docs/evolve.md)
 bench/results/
 bench/evolve/
+regressions/
