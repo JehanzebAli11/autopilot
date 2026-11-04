@@ -170,7 +170,8 @@ end
 
 function Editor:_hello()
 	local h: any = { type = "hello", protocol = Link.PROTOCOL, plugin_version = Editor.VERSION, engine = "roblox",
-		engine_version = version(), project = self:projectName(), host = "editor", inspect = true,
+		engine_version = version(), project = self:projectName(), host = "editor",
+		inspect = Settings.get(self.plugin, "show_policy_log") ~= false,
 		-- `levels`, `timed_hold`, `touch`, `gamepad`, `device`, `players` (multiplayer); `media` when Studio gives
 		-- the plugin pictures
 		features = { "levels", "timed_hold", "touch", "gamepad", "device", "players" },
@@ -182,6 +183,12 @@ function Editor:_hello()
 	local pid = self:projectId()
 	if pid then
 		h.project_id = pid
+	end
+	-- whether the agent service runs its research agent, only once the user chose (the dock's Research agent switch);
+	-- left out, the agent service decides (off for the Aura app's, on for its own)
+	local research = Settings.get(self.plugin, "research")
+	if type(research) == "boolean" then
+		h.research = research
 	end
 	if self.activitySince then
 		local since = self.activitySince()
@@ -309,6 +316,14 @@ function Editor:setSharing(share: boolean): boolean
 		return false
 	end
 	return self.link:send({ type = "save_preferences", share = share })
+end
+
+-- A dock setting the hello carries changed (Show Policy Log's `inspect`, Research agent's `research`): the hello again,
+-- as on a privacy change, without interrupting a run (`inspect` applies at once, `research` from the next run).
+function Editor:helloChanged()
+	if self:connected() then
+		self:_hello()
+	end
 end
 
 -- --- frames from the brain -----------------------------------------------------------------------------------------
