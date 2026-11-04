@@ -399,6 +399,19 @@ def test_studio_state_is_read_when_the_connector_doesnt_know(place):
 
 # -- the console as a detector ---------------------------------------------------------------------------------
 
+def test_the_whole_console_can_be_kept_in_a_file(place, tmp_path):
+    game, link, backend = connect(place)
+    backend.console_file = str(tmp_path / "console.txt")
+    link.request("session", {"action": "start"})
+    backend.poll_console()
+    place.console.append('[Gauntlet] {"event": "death"}')
+    backend.poll_console()
+    lines = (tmp_path / "console.txt").read_text().splitlines()
+    assert lines == ["Hero joined the game", "ServerScriptService.Broken:3: attempt to index nil with 'Value'",
+                     '[Gauntlet] {"event": "death"}']  # (every line, not just the errors the brain is sent)
+    backend.close()
+
+
 def test_console_errors_are_log_events_and_findings(playing):
     game, link, backend, place = playing
     seen = []

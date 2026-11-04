@@ -232,6 +232,10 @@ def test_a_studio_id_is_passed_when_the_server_needs_one(monkeypatch):
     assert studio.studio_id == "abc"
     studio.execute_luau("1")
     assert server.calls[-1][1]["studio_id"] == "abc"
+    # (a Studio window without a place open, its start page, has no name: it can't be played, so it doesn't count)
+    studios["studios"].append({"id": "start-page", "name": None})
+    assert mcp.Studio.connect(mcp.LocalTransport(server)).studio_id == "abc"
+    studios["studios"].pop()
     # (a list, with studio_id: an older shape)
     server.handlers[mcp.LIST_ROBLOX_STUDIOS] = lambda a: json.dumps([{"studio_id": "old"}])
     assert mcp.Studio.connect(mcp.LocalTransport(server)).studio_id == "old"
