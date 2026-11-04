@@ -391,6 +391,12 @@ class Game:
             from .geom import wrap
 
             moved = wrap(y1 - y0) if axis == "x" else (p1 - p0)
+            if abs(moved) <= 0.05:
+                # (a turn can come in late: e.g. Roblox's camera turns only once the right button it presses has locked
+                # the mouse, a few frames after the move was sent)
+                time.sleep(0.25)
+                y1, p1 = self.view_rotation()
+                moved = wrap(y1 - y0) if axis == "x" else (p1 - p0)
             if abs(moved) > 0.05:
                 self.look[axis] = moved / counts
                 # turn back

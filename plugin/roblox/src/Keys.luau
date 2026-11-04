@@ -368,6 +368,11 @@ settle = function()
 	if rightHeld or os.clock() - turning.releasedAt > 0.5 then
 		return
 	end
+	-- (a few frames since the button went up, whatever MouseBehavior says at once: the camera puts the mouse back where
+	-- it held it meanwhile, and a pointer moved before that is moved back)
+	while os.clock() - turning.releasedAt < 0.05 do
+		RunService.Heartbeat:Wait()
+	end
 	for _ = 1, 8 do
 		if UserInputService.MouseBehavior == Enum.MouseBehavior.Default then
 			break
