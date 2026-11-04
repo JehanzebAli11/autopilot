@@ -9,8 +9,8 @@
       "className": "TextLabel",
       "properties": {
         "Text": "Coins: 0",
-        "Position": [[0, 16], [0, 16]],
-        "Size": [[0, 160], [0, 32]],
+        "Position": {"UDim2": [[0, 16], [0, 16]]},
+        "Size": {"UDim2": [[0, 160], [0, 32]]},
         "TextScaled": true
       }
     },
@@ -19,8 +19,8 @@
       "className": "TextLabel",
       "properties": {
         "Text": "Stage: 0",
-        "Position": [[0, 16], [0, 56]],
-        "Size": [[0, 160], [0, 32]],
+        "Position": {"UDim2": [[0, 16], [0, 56]]},
+        "Size": {"UDim2": [[0, 160], [0, 32]]},
         "TextScaled": true
       }
     },
@@ -30,8 +30,8 @@
       "properties": {
         "Text": "",
         "Visible": false,
-        "Position": [[0.5, -200], [0, 96]],
-        "Size": [[0, 400], [0, 48]],
+        "Position": {"UDim2": [[0.5, -200], [0, 96]]},
+        "Size": {"UDim2": [[0, 400], [0, 48]]},
         "TextScaled": true
       }
     }
