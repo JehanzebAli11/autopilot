@@ -6,8 +6,8 @@ the protocol's requests (docs/protocol.md) by calling Studio's MCP tools:
 - reads (context, find, transforms, pose, movement, rc, screen, ui, view) are Luau ops (engines/roblox.luau) run with
   execute_luau; the requests that come in together (a harness's game.batch in observe()) are coalesced into ONE
   execute_luau call, whose answer is one JSON string (HttpService:JSONEncode);
-- inputs: user_keyboard_input (keys), user_mouse_input (clicks, the pointer, camera turns with the right button held),
-  character_navigation (`move`);
+- inputs: user_keyboard_input (keys), user_mouse_input (clicks, the pointer, the wheel), character_navigation (`move`);
+  camera turns are the `turn` Luau op in the player's client (Studio's synthetic right-drag doesn't turn the camera);
 - the session: start_stop_play (restart is stop, then start); `capture` is screen_capture (stills, no video);
 - the errors the game logs: get_console_output, polled while the game plays, as `log` events and log_error findings;
 - the codex: a Rojo project's files from disk when there is one, else every script read with script_read; and the
@@ -18,8 +18,8 @@ y turning left (from -z toward -x), x tilting the view up; applied y, then x, th
 0.28 m. The kit's: X forward, Y right, Z up, centimetres:
     kit (X, Y, Z) = 28 * (-z, x, y);  kit yaw = -orientation.y;  kit pitch = orientation.x
 
-Everything here is tested against engines/roblox_mcp.FakeStudio and tests/robloxsim.py, not a live Studio: the tool
-argument shapes are guesses until checked (the TODO(verify) marks in roblox_mcp.py).
+The tool argument shapes were checked against a live Studio (docs/studio_tools.txt); the tests run against
+engines/roblox_mcp.FakeStudio and tests/robloxsim.py, which follow them.
 """
 
 import base64
@@ -65,11 +65,17 @@ KEYCODES = {"SpaceBar": "Space", "Enter": "Return", "BackSpace": "Backspace", "L
 # The requests that are the player's inputs: answered one after another, in the order they came
 INPUT_OPS = ("key", "input", "pointer", "ui_act", "move")
 MOUSE_BUTTONS = {"LeftMouseButton": "left", "RightMouseButton": "right", "MiddleMouseButton": "middle"}
+# Degrees a mouse count (MouseX / MouseY) turns the camera: the kit's calibrate_look() measures it; about what a
+# pixel of a right-drag turns Roblox's default camera
+DEGREES_PER_COUNT = 0.5
+WHEEL_NOTCHES = 10  # the most wheel notches one MouseScroll press sends
 DATAMODEL_PREFIX = re.compile(r"^(server|client|edit):", re.I)
 INPUT_NOTES = [
     "Keys and clicks go into Studio's play session through its MCP server (user_keyboard_input, user_mouse_input), "
     "each a round trip of its own: inputs land tens to hundreds of milliseconds after they are sent.",
-    "MouseX / MouseY turn the camera as a player does on Roblox, by dragging with the right mouse button held.",
+    "MouseX / MouseY turn the camera by setting its look direction in the player's client (one count: "
+    f"{DEGREES_PER_COUNT:g} degree), as a right-drag would: Studio's MCP mouse can't drag the camera itself.",
+    "Studio's MCP mouse has left and right buttons only: no middle button.",
     "game.request('move', {'to': kit point} or {'object': path}) walks the character there with Studio's "
     "character_navigation (pathfinding), not the player's keys.",
 ]
@@ -635,11 +641,15 @@ class StudioBackend:
         return self.running
 
     def _studio_says_running(self):
-        """True / False when get_studio_state's answer says it plainly, else None. TODO(verify) its format."""
+        """True / False when get_studio_state's answer says it plainly, else None. The live server: text lines,
+        "- Current Studio Mode: Edit" or "... Play"."""
         try:
             state = self.studio.studio_state()
         except mcp.McpError:
             return None
+        m = re.search(r"current studio mode:\s*(\w+)", str(state or ""), re.I) if not isinstance(state, dict) else None
+        if m:
+            return m.group(1).lower() != "edit"
         if isinstance(state, dict):
             for key in ("is_playing", "isPlaying", "playing", "running", "is_running"):
                 if isinstance(state.get(key), bool):
@@ -889,7 +899,9 @@ class StudioBackend:
             return {}
         if key in ("MouseScrollUp", "MouseScrollDown", "MouseWheelAxis"):
             delta = float(args.get("value") or 1.0) * (-1 if key == "MouseScrollDown" else 1)
-            self.studio.mouse([mcp.mouse_scroll(delta)])
+            notches = max(1, min(WHEEL_NOTCHES, round(abs(delta))))
+            x, y = self.pointer()
+            self.studio.mouse([mcp.mouse_scroll(delta > 0, x, y)] * notches)
             return {}
         if key in MOUSE_BUTTONS:
             return self._button(MOUSE_BUTTONS[key], mode, float(args.get("lease") or 0.6))
@@ -913,8 +925,14 @@ class StudioBackend:
                 self.studio.keyboard([mcp.key_action("up", code)])
         return {}
 
+    def pointer(self):
+        """Where the mouse is (viewport pixels): where game.pointer put it, else the middle of the view."""
+        return self.pointer_at or (self.viewport[0] / 2, self.viewport[1] / 2)
+
     def _button(self, button, mode, lease):
-        x, y = self.pointer_at or (self.viewport[0] / 2, self.viewport[1] / 2)
+        if button not in mcp.MOUSE:
+            raise OpFailed(400, f"Studio's MCP mouse has no {button} button (left and right only)")
+        x, y = self.pointer()
         if mode == "press":
             self.studio.mouse([mcp.mouse_click(button, x, y)])
         elif mode == "hold":
@@ -922,20 +940,21 @@ class StudioBackend:
                 new = button not in self.held_buttons
                 self.held_buttons[button] = time.monotonic() + lease
             if new:
-                self.studio.mouse([mcp.mouse_move(x, y), mcp.mouse_button("down", button)])
+                self.studio.mouse([mcp.mouse_button("down", button, x, y)])
         elif mode == "release":
             with self.lock:
                 was = self.held_buttons.pop(button, None)
             if was is not None:
-                self.studio.mouse([mcp.mouse_button("up", button)])
+                self.studio.mouse([mcp.mouse_button("up", button, x, y)])
         return {}
 
     def turn(self, counts, axis):
-        """Turn Roblox's camera as a player does: drag with the right button held (one count: one pixel)."""
-        cx, cy = self.viewport[0] / 2, self.viewport[1] / 2
-        dx, dy = (counts, 0.0) if axis == "MouseX" else (0.0, -counts)  # (the kit's mouse up is the screen's -y)
-        self.studio.mouse([mcp.mouse_move(cx, cy), mcp.mouse_button("down", "right"),
-                           mcp.mouse_move(cx + dx, cy + dy), mcp.mouse_button("up", "right")])
+        """Turn Roblox's camera by `counts` (DEGREES_PER_COUNT each): MouseX right, MouseY up. The `turn` op sets the
+        camera's look in the player's client, and Roblox's camera scripts carry on from there, as after a right-drag
+        (on the live server the MCP mouse's right-drag doesn't reach the camera)."""
+        degrees = float(counts) * DEGREES_PER_COUNT
+        self.luau("turn", {"yaw": degrees, "pitch": 0.0} if axis == "MouseX" else {"yaw": 0.0, "pitch": degrees},
+                  "Client")
 
     def op_input(self, args):
         if args.get("mode") == "release":
@@ -965,8 +984,8 @@ class StudioBackend:
         dot = mcp.dot_path(target)
         if action in ("click", "double_click", "right_click"):
             button = "right" if action == "right_click" else "left"
-            clicks = [mcp.mouse_click(button, target=dot)] * (2 if action == "double_click" else 1)
-            self.studio.mouse(clicks)
+            clicks = [mcp.mouse_click(button)] * (2 if action == "double_click" else 1)
+            self.studio.mouse([mcp.mouse_move(target=dot)] + clicks)
         elif action == "set":
             text = args.get("text") if args.get("text") is not None else args.get("value")
             self.studio.keyboard([mcp.text_action(str(text if text is not None else ""), target=dot)])
@@ -1001,7 +1020,8 @@ class StudioBackend:
             if keys:
                 self.studio.keyboard([mcp.key_action("up", k) for k in keys])
             if buttons:
-                self.studio.mouse([mcp.mouse_button("up", b) for b in buttons])
+                x, y = self.pointer()
+                self.studio.mouse([mcp.mouse_button("up", b, x, y) for b in buttons])
         except mcp.McpError as e:
             self.async_errors = (self.async_errors + [str(e)])[-20:]
 
@@ -1020,7 +1040,8 @@ class StudioBackend:
                 if keys:
                     self.studio.keyboard([mcp.key_action("up", k) for k in keys])
                 if buttons:
-                    self.studio.mouse([mcp.mouse_button("up", b) for b in buttons])
+                    x, y = self.pointer()
+                    self.studio.mouse([mcp.mouse_button("up", b, x, y) for b in buttons])
             except mcp.McpError:
                 pass
 
@@ -1152,7 +1173,7 @@ class StudioBackend:
             for svc in ("Workspace", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui",
                         "StarterPlayer", "StarterPack", "ReplicatedFirst", "Lighting", "Teams"):
                 try:
-                    text = self.studio.search_game_tree(path=f"game.{svc}", depth=6)
+                    text = self.studio.search_game_tree(path=svc, depth=6, datamodel=self.datamodel(write=True))
                 except mcp.McpError as e:
                     text = f"(couldn't read: {e})"
                 parsed = mcp.parse_json(text)
@@ -1177,8 +1198,8 @@ def keycode(key):
 
 
 def console_level(line):
-    """"Error", "Warning" or None for a console line. TODO(verify): get_console_output's line format (whether it says
-    each line's message type); until then by its words."""
+    """"Error", "Warning" or None for a console line, by its words: Studio's get_console_output doesn't say a line's
+    message type (an error, a warn() and a print() look alike)."""
     low = line.lower()
     if re.search(r"\b(error|exception)\b|attempt to (index|call|perform|compare|concatenate)|is not a valid member|"
                  r"stack begin|script timeout|unable to cast|missing argument", low):
