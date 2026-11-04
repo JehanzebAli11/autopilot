@@ -13,7 +13,8 @@
 --  - every other request goes to a side of the play session over the pipe (Host.luau): `rc` to the server unless its
 --    path is the client's (the player's PlayerGui, PlayerScripts, camera; Route below), the player's ops (view, key,
 --    move, ui...) to the client; their answers and events come back the same way and go on to the brain;
---  - with no play session, `context` and `ping` are answered here (session_running false), the rest get 409;
+--  - with no play session, `context`, `ping`, `screen` (no texts), `ui` (no elements) and `timestep` are answered here
+--    (session_running false), the rest get 409;
 --  - `device` switches the device Studio simulates (Device.luau: a phone or tablet makes the game a touch device) here
 --    with no play session, in its client during one; a session's start takes `device` and `orientation` too, and the
 --    user's own device comes back when the run ends;
@@ -31,6 +32,7 @@ local Link = require(script.Parent.Link)
 local Media = require(script.Parent.Media)
 local Paths = require(script.Parent.Paths)
 local Settings = require(script.Parent.Settings)
+local Ui = require(script.Parent.Ui)
 
 local Editor = {}
 Editor.__index = Editor
@@ -84,6 +86,7 @@ function Editor.new(plugin: Plugin)
 	self.sides = {} -- side -> {ready = bool, seen = os.clock()}
 	self.playing = false -- a play session runs (its client is attached)
 	self.starting = false -- we asked Studio to play and it hasn't ended
+	self.joining = false -- a multiplayer test's other players are being waited for
 	self.forwarded = {} -- brain request id -> when it went to the play session
 	self.detectorConfig = {}
 	self.media = false -- Studio gives the plugin pictures (StudioCaptureService), known a moment after the start
@@ -171,9 +174,12 @@ end
 function Editor:_hello()
 	local h: any = { type = "hello", protocol = Link.PROTOCOL, plugin_version = Editor.VERSION, engine = "roblox",
 		engine_version = version(), project = self:projectName(), host = "editor", inspect = true,
-		-- `levels`, `timed_hold`, `touch`, `gamepad`, `device`, `players` (multiplayer); `media` when Studio gives
-		-- the plugin pictures
-		features = { "levels", "timed_hold", "touch", "gamepad", "device", "players" },
+		-- `levels`, `timed_hold`, `pointer`, `touch`, `gamepad`, `device`, `players` (multiplayer); `media` when
+		-- Studio gives the plugin pictures
+		features = { "levels", "timed_hold", "pointer", "touch", "gamepad", "device", "players" },
+		-- (how input reaches the games it plays, as the other plugins' hellos say: the client's context says it for
+		-- the game playing)
+		input = Ui.inputCaps({ playing = false }),
 		share = self.privacyReady and Settings.get(self.plugin, "share") ~= false,
 		place_id = game.PlaceId, universe_id = game.GameId, transport = self.link.transport }
 	if self.media then
@@ -422,7 +428,8 @@ function Editor:_editorContext(): any
 	return { world = "", scene = game.Name, character = "", controller = "", input_subsystem = "", camera_manager = "",
 		camera = "", game_name = game.Name, host = "editor", engine = "roblox", session_running = false, paused = false,
 		players = {}, you = 1,
-		game_time = 0, project_dir = "", controls = {}, place_id = game.PlaceId, universe_id = game.GameId }
+		game_time = 0, project_dir = "", controls = {}, place_id = game.PlaceId, universe_id = game.GameId,
+		input = Ui.inputCaps({ playing = false }), net = { mode = "standalone" } }
 end
 
 function Editor:_levels(): any
@@ -516,6 +523,13 @@ function Editor:_onRequest(frame: any)
 			self:_respond(id, { game_time = Json.null, wall_time = DateTime.now().UnixTimestampMillis / 1000 })
 		elseif op == "pause" then
 			self:_respond(id, { paused = false })
+		elseif op == "screen" then
+			-- (no game: nothing on screen, as the other plugins answer)
+			self:_respond(id, { texts = Json.object() })
+		elseif op == "ui" then
+			self:_respond(id, { elements = {} })
+		elseif op == "timestep" then
+			self:_respond(id, Json.object())
 		else
 			self:_respondError(id, "No game is running (start one with session start)", 409)
 		end
@@ -632,6 +646,7 @@ function Editor:play(players: number?): (boolean, string?)
 	if want > 1 then
 		-- (Studio starts each player's client in a process of its own, one after another: a client that doesn't come
 		-- is asked for again, once, through the server)
+		self.joining = true
 		local all = self:_waitFor(function()
 			return self:_clientsHere() >= want
 		end, PLAYERS_TIMEOUT)
@@ -642,11 +657,34 @@ function Editor:play(players: number?): (boolean, string?)
 				return self:_clientsHere() >= want
 			end, PLAYERS_TIMEOUT)
 		end
+		self.joining = false
 		if not all then
 			return false, string.format("Only %d of %d players joined the multiplayer test", self:_clientsHere(), want)
 		end
 	end
 	return true, nil
+end
+
+-- Whether a play session is starting and not ready yet (session status `loading`: the agent service waits it out):
+-- asked for and its client not attached, a side attached and player 1's client not ready, or a multiplayer test's
+-- other players still joining. (self.starting stays true for the whole play session: not alone.)
+function Editor:loading(): boolean
+	if self.joining then
+		return true
+	end
+	if self.playing then
+		return false
+	end
+	if self.starting then
+		return true
+	end
+	local t = now()
+	for _, s in pairs(self.sides) do
+		if t - s.seen < 8 then -- (a side that went quiet is a play session's leftover, not one starting)
+			return true
+		end
+	end
+	return false
 end
 
 -- End the play session (its server ends the test); returns once it is gone.
@@ -693,7 +731,8 @@ function Editor:_session(id: any, args: any)
 	local action = tostring(args.action or "status")
 	local map = tostring(args.map or "")
 	if map ~= "" and map ~= game.Name and map ~= self:projectName() then
-		self:_respondError(id, "No level " .. map .. ": a Roblox place is one level (" .. game.Name .. ")")
+		-- (before anything changes)
+		self:_respondError(id, "No level " .. map .. ": a Roblox place is one level (" .. game.Name .. ")", 404)
 		return
 	end
 	if args.players ~= nil then
@@ -744,7 +783,8 @@ function Editor:_session(id: any, args: any)
 			self:_respondError(id, err or "couldn't restart", 500)
 		end
 	else
-		self:_respond(id, { running = self.playing, players = self:_clientsHere() })
+		self:_respond(id, { running = self.playing, loading = self:loading(), scene = game.Name,
+			players = self:_clientsHere() })
 	end
 end
 
@@ -767,7 +807,8 @@ function Editor:_playEnded()
 	end
 	table.clear(self.forwarded)
 	if self:connected() then
-		self:_send({ type = "events", events = { { kind = "session", t = Json.null, running = false } }, t = Json.null })
+		self:_send({ type = "events", events = { { kind = "session", t = Json.null, running = false, scene = game.Name } },
+			t = Json.null })
 	end
 	self:_fire("playing", false)
 end
@@ -832,8 +873,8 @@ function Editor:_onPipeFrame(frame: any)
 		if side == "client" and not self.playing then
 			self.playing = true
 			if self:connected() then
-				self:_send({ type = "events", events = { { kind = "session", t = frame.t or 0, running = true } },
-					t = frame.t or 0 })
+				self:_send({ type = "events", events = { { kind = "session", t = frame.t or 0, running = true,
+					scene = game.Name } }, t = frame.t or 0 })
 			end
 			self:_fire("playing", true)
 		end
