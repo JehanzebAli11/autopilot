@@ -27,6 +27,9 @@ never this machine's first-run setup (an Aura choice would send every prompt thr
 team's memory and billing the account) nor its autopilot.env. On macOS the brain's settings folder can't be moved:
 sign out of Aura there first.
 
+--record (macOS) screen-records each prompt into <prompt>/screen.mov (screencapture: the terminal running the bench
+needs the Screen Recording permission), bringing Roblox Studio to the front first for a Roblox place.
+
 Use a copy of your game, not the project you work in: runs write to the game's Saved folder, and the bench starts
 and stops the game. Headless games still use plenty of memory (several GB each): keep --parallel low.
 """
@@ -85,6 +88,7 @@ def run_one(item, args, root):
         env["AUTOPILOT_MODEL"] = args.model
     if args.agent:
         env["AUTOPILOT_AGENT"] = args.agent
+    recording = record(work, eng) if args.record else None
     brain_log = open(os.path.join(work, "brain.log"), "w", encoding="utf-8")
     brain = subprocess.Popen([PYTHON, "-u", "-m", "autopilot", "play", item["prompt"], "--port", str(port),
                               "--project", path],
@@ -106,6 +110,8 @@ def run_one(item, args, root):
         for p in (brain, game):
             processes.kill(p)
         brain_log.close()
+        if recording:
+            stop_recording(recording)
     reports = sorted(glob.glob(os.path.join(pdir, "runs", "*", "report.json")), key=os.path.getmtime)
     if not reports and not args.warm:
         # (the plugin named the project otherwise than its folder: this prompt's memory holds that project alone)
@@ -121,8 +127,33 @@ def run_one(item, args, root):
             "evidence": report.get("evidence", [])[:4], "seconds": round(time.time() - started),
             "implementer_seconds": report.get("seconds"), "episodes": report.get("episodes"),
             "cost_usd": report.get("cost_usd"), "tokens": report.get("tokens"), "turns": report.get("turns"),
-            "agent": report.get("agent"),
+            "agent": report.get("agent"), "started": round(started, 1),
             "dir": work}
+
+
+def record(work, eng):
+    """Start screen-recording a prompt (macOS: screencapture), with Roblox Studio in front for a Roblox place."""
+    if sys.platform != "darwin":
+        print("  (--record: only on macOS)", flush=True)
+        return None
+    if eng.name == "roblox":
+        subprocess.run(["osascript", "-e", 'tell application "RobloxStudio" to activate'], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+    return subprocess.Popen(["screencapture", "-v", "-x", os.path.join(work, "screen.mov")],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def stop_recording(proc):
+    """Stop a recording; screencapture writes its file on SIGINT."""
+    import signal
+
+    if proc.poll() is None:
+        proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def fps_cap(eng, fps):
@@ -154,6 +185,7 @@ def main():
     p.add_argument("--agent", choices=["opencode", "claude", "codex"],
                    help="the agent (default: AUTOPILOT_AGENT, else opencode)")
     p.add_argument("--out")
+    p.add_argument("--record", action="store_true", help="screen-record each prompt (macOS): <prompt>/screen.mov")
     p.add_argument("--quiet", action="store_true",
                    help="print only verdicts, times and costs (no summaries: for a held-out test set)")
     args = p.parse_args()

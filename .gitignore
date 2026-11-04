@@ -41,3 +41,8 @@ Thumbs.db
 bench/results/
 bench/evolve/
 regressions/
+
+# The learning curves of tools/learning_curve.py, and Rojo builds of the example places in the repository's root
+bench/learning/
+/*.rbxlx
+/*.rbxlx.lock
