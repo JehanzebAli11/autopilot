@@ -114,7 +114,8 @@ explains how to set it up, how to measure its latency, and what it can't do yet.
 
 `autopilot evolve` tries changes to Autopilot's own prompt, kit reference, controller constants or a game's lib.py,
 measures each one on a locked bench suite, and keeps only those that do better. `autopilot regress` replays every
-CONFIRMED verification without a language model. [docs/evolve.md](docs/evolve.md) explains both.
+CONFIRMED verification without a language model. [docs/evolve.md](docs/evolve.md) explains both, and
+[docs/qa-agent.md](docs/qa-agent.md) plans what comes next: a QA agent with anti-cheat audits and a fixer loop.
 
 ## Contributing
 
