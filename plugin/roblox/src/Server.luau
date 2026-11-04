@@ -107,6 +107,7 @@ function Server.start(plugin: Plugin)
 	end
 	table.insert(host.tickers, function(dt)
 		if detectors then
+			detectors:setActive(host:runUsingGame())
 			detectors:tick(dt)
 		end
 	end)

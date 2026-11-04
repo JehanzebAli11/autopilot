@@ -20,6 +20,10 @@ local World = require(script.Parent.World)
 local Host = {}
 Host.__index = Host
 
+-- How long after the brain last asked this side something a run counts as using the game (a run the editor didn't
+-- see start: a coding agent's, `autopilot serve`'s requests)
+Host.RUN_USE_SECONDS = 30
+
 export type Op = (any, any, any) -> (boolean, any, number?)
 
 -- The side a play session's client answers as: "client" for player 1 (the player Autopilot plays as), "client2",
@@ -152,9 +156,14 @@ function Host:_onFrame(frame: any)
 	end
 	local kind = frame.type
 	if kind == "request" then
+		self.lastRequestAt = os.clock()
 		self:_handle(frame)
+	elseif kind == "run" then
+		self.runActive = frame.active == true -- (the editor's run started or ended)
 	elseif kind == "attach" then
 		self.attached = true
+		self.runActive = frame.run_active == true
+		self.lastRequestAt = nil
 		if self.onAttach then
 			self.onAttach(frame)
 		end
@@ -170,10 +179,18 @@ end
 -- Release input immediately; detached hosts no longer tick their input leases.
 function Host:_detach()
 	self.attached = false
+	self.runActive = false
 	self.events = {}
 	if self.onDetach then
 		self.onDetach()
 	end
+end
+
+-- Whether a run uses the game now: the editor's run is going, or the brain asked this side something in the last
+-- RUN_USE_SECONDS. The detectors work only then (in the user's own play sessions nothing reads what they find).
+function Host:runUsingGame(): boolean
+	return self.attached and (self.runActive == true
+		or (self.lastRequestAt ~= nil and os.clock() - self.lastRequestAt < Host.RUN_USE_SECONDS))
 end
 
 -- Join the editor's pipe once its settings say where, and again when they change.

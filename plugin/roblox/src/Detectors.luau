@@ -24,6 +24,7 @@ function Detectors.new(emit: (any) -> (), now: () -> number, screen: (() -> { [s
 	self.now = now -- the game time
 	self.screen = screen
 	self.enabled = true
+	self.active = false -- a run uses the game (the host's runUsingGame): only then do the detectors work
 	self.counts = {}
 	self.config = { long_fall_seconds = 8.0, hitch_seconds = 0.75, hud_every = 0.25, scan_every = 0.5,
 		out_of_world_margin = 50.0 }
@@ -38,6 +39,20 @@ function Detectors.new(emit: (any) -> (), now: () -> number, screen: (() -> { [s
 		self:_log(message, kind)
 	end))
 	return self
+end
+
+-- On while a run uses the game, off otherwise. Back on, they start afresh: what was seen before isn't this run's, and
+-- the session's first seconds count again as its time to settle.
+function Detectors:setActive(on: boolean)
+	if on and not self.active then
+		self.counts = {}
+		self.started = os.clock()
+		self.falling = 0
+		self.hudAt = 0
+		self.scanAt = 0
+		self.flagged = setmetatable({}, { __mode = "k" })
+	end
+	self.active = on
 end
 
 function Detectors:stop()
@@ -89,6 +104,9 @@ function Detectors:_finding(f: any)
 end
 
 function Detectors:_log(message: string, kind: Enum.MessageType)
+	if not self.active then
+		return
+	end
 	if kind ~= Enum.MessageType.MessageError and kind ~= Enum.MessageType.MessageWarning then
 		return
 	end
@@ -112,7 +130,7 @@ end
 
 -- Once a frame: real_dt, the frame's wall time.
 function Detectors:tick(realDt: number)
-	if not self.enabled or self.paused then
+	if not self.active or not self.enabled or self.paused then
 		return
 	end
 	local loading = os.clock() - self.started < 3

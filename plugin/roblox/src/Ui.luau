@@ -181,7 +181,8 @@ function Ui.list(): { any }
 		if label == "" and g:IsA("TextBox") then
 			label = (g :: TextBox).PlaceholderText
 		end
-		local enabled = g.Active
+		-- (Interactable decides whether it takes input; Active only whether it sinks input from the world behind it)
+		local enabled = true
 		local ok, interactable = pcall(function()
 			return (g :: any).Interactable
 		end)
@@ -283,7 +284,7 @@ function Ui.act(args: any): (boolean, any)
 		local out: any = { via = if UserInputService.TouchEnabled and button == Enum.UserInputType.MouseButton1
 			then "touch" else "mouse", fired = fired }
 		if not fired then
-			out.note = "the element didn't take the click (something on top of it, or it isn't Active)"
+			out.note = "the element didn't take the click (something on top of it, or it isn't Interactable)"
 		end
 		return true, out
 	elseif action == "set" then

@@ -325,3 +325,19 @@ def test_the_plugin_plays_several_players():
     assert "GetTestArgs()" in host and 'return if (n or 1) <= 1 then "client" else "client" .. tostring(n)' in host
     assert "Host.clientSide(index)" in sources["Client"] and "players = players()" in sources["Client"]
     assert "function Paths.forPlayer" in sources["Paths"] and "p.UserId < 0" in sources["Paths"]
+
+
+def test_the_detectors_work_only_while_a_run_uses_the_game():
+    """As the other engines' plugins: the detectors (and the game's log) only while the editor's run is going or the
+    brain asked that side something in the last 30 s; afresh each time they come on."""
+    sources = _sources()
+    host = sources["Host"]
+    assert "function Host:runUsingGame()" in host and "Host.RUN_USE_SECONDS = 30" in host
+    assert "self.lastRequestAt = os.clock()" in host and 'kind == "run"' in host
+    for side in ("Client", "Server"):
+        assert "detectors:setActive(host:runUsingGame())" in sources[side]
+    detectors = sources["Detectors"]
+    assert "function Detectors:setActive(on: boolean)" in detectors
+    assert "if not self.active then" in detectors and "if not self.active or not self.enabled" in detectors
+    editor = sources["Editor"]
+    assert editor.count("run_active = self.runActive") == 2 and 'type = "run", active = self.runActive' in editor

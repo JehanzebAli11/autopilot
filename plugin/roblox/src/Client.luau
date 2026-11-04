@@ -502,6 +502,7 @@ function Client.start(plugin: Plugin)
 	table.insert(host.tickers, tickKeys)
 	table.insert(host.tickers, function(dt)
 		if detectors then
+			detectors:setActive(host:runUsingGame())
 			detectors:tick(dt)
 		end
 	end)

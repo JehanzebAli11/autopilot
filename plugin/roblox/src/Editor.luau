@@ -821,7 +821,7 @@ function Editor:_onPipeFrame(frame: any)
 	if kind == "here" then
 		-- A side of a play session joined: attach it (its detectors on, its events to the brain)
 		self.sides[side] = { ready = false, seen = now() }
-		self:_pipeSend({ to = side, type = "attach", detectors = self.detectorConfig })
+		self:_pipeSend({ to = side, type = "attach", detectors = self.detectorConfig, run_active = self.runActive })
 	elseif kind == "ready" then
 		self.sides[side] = { ready = true, seen = now() }
 		if side == "client" and self.recordArgs then
@@ -841,7 +841,7 @@ function Editor:_onPipeFrame(frame: any)
 		if s == nil then
 			-- (attached before this editor's state was lost, a plugin reload: attach it again)
 			self.sides[side] = { ready = false, seen = now() }
-			self:_pipeSend({ to = side, type = "attach", detectors = self.detectorConfig })
+			self:_pipeSend({ to = side, type = "attach", detectors = self.detectorConfig, run_active = self.runActive })
 		end
 	elseif kind == "bye" then
 		self.sides[side] = nil
@@ -865,6 +865,11 @@ function Editor:_tick()
 		self.heartbeatAt = t
 		self:_send({ type = "events", events = { { kind = "heartbeat", t = Json.null, fps = 60, paused = false } },
 			t = Json.null })
+	end
+	-- the play session's sides hear when a run starts or ends: their detectors work while one uses the game
+	if self.runActive ~= self.runTold then
+		self.runTold = self.runActive
+		self:_pipeSend({ to = "play", type = "run", active = self.runActive })
 	end
 	if self.playing then
 		if t - (self.whoAt or 0) >= 2 then
