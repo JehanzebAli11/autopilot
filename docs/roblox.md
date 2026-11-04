@@ -91,9 +91,10 @@ them has been run against Studio yet.
 
 ## Known limits
 
-- **Latency.** Every read and input is an MCP round trip, likely tens to hundreds of milliseconds (not measured yet).
-  Batched reads cost one round trip, so the agent is told to batch them. Reflex play (dodging a hit a fraction of a
-  second ahead) is likely out of reach. The decision tempo is bounded by the measured latency.
+- **Latency.** Every read and input is an MCP round trip. Measured on a Mac (`tools/roblox_latency.py`, a batched
+  observe of 4 reads in the Client, n=100): p50 67 ms, p95 72 ms, so `tick_hz` <= 13.9 and `tempo` <= 6.9 decisions a
+  second. A key press is about 35 ms, a mouse click 0.25-0.6 s. Batched reads cost one round trip, so the agent is
+  told to batch them. Reflex play (dodging a hit a fraction of a second ahead) is mostly out of reach.
 - **No pause.** Studio's MCP server can't pause a play session: the game runs while the agent thinks.
 - **Stills, not video.** There is no recording, only `screen_capture` stills.
 - **No frame-accurate detectors.** Findings come from the console (errors and warnings). NaN, hitch, teleport and
@@ -139,8 +140,6 @@ Read from Studio's MCP server (RobloxStudio 1.0.0, macOS, 2026-11) on the test p
 
 ## Open questions
 
-- **Real latency** of a whole observe in play mode, and so the tempo a harness can keep: `tools/roblox_latency.py`
-  measures it (a single `execute_luau` round trip was about 65 ms on the machine tried).
 - **Windows**: everything above was read on macOS. The server's command differs (`mcp.bat`); the tools should not.
 
 ## Future work: Route B
