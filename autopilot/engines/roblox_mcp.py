@@ -2,11 +2,11 @@
 (JSON-RPC 2.0, one JSON message a line: initialize, tools/list, tools/call, with timeouts), the Studio tools it uses,
 and FakeStudio, a stand-in server for the tests (no Studio needed).
 
-Every tool name and argument shape the engine depends on is in this module and nowhere else. Roblox documents the
-tools' names and what they take (create.roblox.com/docs/studio/mcp) but not their exact JSON schemas, so the argument
-names are picked from the schema each tool advertises in tools/list when it advertises one, and fall back to the
-guesses marked TODO(verify) below. Everything here is checked against FakeStudio only: verify the TODOs against a live
-server's tools/list (`python tools/roblox_latency.py --tools` prints it) before relying on them.
+Every tool name and argument shape the engine depends on is in this module and nowhere else. The argument names
+are picked from the schema each tool advertises in tools/list (the first name in ARGS is the live server's own), and
+the input actions' JSON is what the live server's schemas say. Both were checked against Studio's own server
+(RobloxStudio 1.0.0, macOS, 2026-11; its tools/list is in docs/studio_tools.txt): `python tools/roblox_latency.py
+--tools` prints it again.
 
 The server's command: AUTOPILOT_ROBLOX_MCP_CMD (a command line), else the one Roblox documents for the platform
 (Windows: `cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat`; macOS: /Applications/RobloxStudio.app/Contents/MacOS/StudioMCP).
@@ -32,12 +32,16 @@ ENV_STUDIO_ID = "AUTOPILOT_ROBLOX_STUDIO_ID"  # which Studio, when the server is
 # mcp.bat lives in the real one, which the bench passes on here for the server's process
 ENV_LOCALAPPDATA = "AUTOPILOT_ROBLOX_LOCALAPPDATA"
 # How execute_luau gives back what a chunk worked out: "return" (the chunk's return value comes back in the tool's
-# result) or "print" (only printed output does: the chunk prints its JSON between markers). TODO(verify): which one
-# the live server does; the parser reads either way, this only decides whether the chunk also prints (which puts every
-# read into Studio's Output window)
+# result) or "print" (only printed output does: the chunk prints its JSON between markers). Studio's server gives back
+# the chunk's first return value as text (a chunk that returns nothing: "nil"; what it prints goes to the Output
+# window, not the result), so "return" it is; the parser reads either way, and "print" also puts every read into the
+# Output window
 ENV_RESULT = "AUTOPILOT_ROBLOX_RESULT"
 TIMEOUT = 30.0  # seconds to wait for an answer to a request
 START_TIMEOUT = 60.0  # ... for initialize (Studio may still be starting)
+# Studio registers with its server a moment after the server starts (list_roblox_studios is empty until then: 0.25-2 s
+# on the live server): how long to wait for it
+STUDIO_WAIT = 15.0
 
 # -- the tools ---------------------------------------------------------------------------------------------------
 # (names from Roblox's docs, create.roblox.com/docs/studio/mcp, 2026-11)
@@ -70,77 +74,87 @@ OPTIONAL = {
     LIST_ROBLOX_STUDIOS: "a server connected to several Studios needs AUTOPILOT_ROBLOX_STUDIO_ID",
 }
 
-# Argument names per tool: for each argument the engine means, the names a server may call it, the likeliest first.
-# The first one the tool's advertised inputSchema has is used; with no schema, the first. TODO(verify) all of these
-# against the live server's tools/list.
+# Argument names per tool: for each argument the engine means, the names a server may call it, the live server's
+# first (the others: older or other servers, such as the open-source studio-rust-mcp-server). The first one the tool's
+# advertised inputSchema has is used; with no schema, the first. Every tool of the live server also takes (and
+# requires) `studio_id`, which Studio.call adds.
 ARGS = {
     EXECUTE_LUAU: {"code": ("code", "source", "luau", "command", "script"),
                    "datamodel": ("datamodel_type", "data_model", "datamodel", "context")},
     START_STOP_PLAY: {"start": ("is_start", "mode", "action", "start")},
-    SCREEN_CAPTURE: {"camera": ("camera_position", "position"), "look_at": ("look_at", "target")},
+    SCREEN_CAPTURE: {"id": ("capture_id",)},
     SEARCH_GAME_TREE: {"path": ("path", "root", "instance_path"), "type": ("instance_type", "class_name", "type"),
-                       "keywords": ("keywords", "query", "keyword"), "depth": ("max_depth", "depth", "depth_limit")},
+                       "keywords": ("keywords", "query", "keyword"), "depth": ("max_depth", "depth", "depth_limit"),
+                       "datamodel": ("datamodel_type", "data_model", "datamodel")},
     INSPECT_INSTANCE: {"path": ("path", "instance_path")},
-    SCRIPT_READ: {"path": ("path", "script_path", "target_file"), "start": ("start_line", "from_line"),
-                  "end": ("end_line", "to_line")},
-    SCRIPT_GREP: {"pattern": ("pattern", "query", "search")},
+    SCRIPT_READ: {"path": ("target_file", "path", "script_path")},
+    SCRIPT_GREP: {"pattern": ("query", "pattern", "search")},
     USER_KEYBOARD_INPUT: {"actions": ("actions", "inputs", "events"),
                           "datamodel": ("datamodel_type", "data_model", "datamodel")},
     USER_MOUSE_INPUT: {"actions": ("actions", "inputs", "events"),
                        "datamodel": ("datamodel_type", "data_model", "datamodel")},
-    CHARACTER_NAVIGATION: {"position": ("target_position", "position", "target"),
-                           "instance": ("instance_path", "target_instance", "path"),
-                           "speed": ("speed_multiplier", "speed")},
+    CHARACTER_NAVIGATION: {"instance": ("instance_path", "target_instance", "path"),
+                           "speed": ("speed_multiplier", "speed"),
+                           "datamodel": ("datamodel_type", "data_model", "datamodel")},
 }
 # Data model names as execute_luau and the input tools take them (Roblox's docs: Edit, Client, Server)
 DATAMODELS = ("Edit", "Client", "Server")
 
 
-# The input tools' actions. Roblox's docs list what they do (keyboard: key down, key up, key press, text input, wait,
-# an optional UI instance target; mouse: move, click, button down/up, scroll, wait, a target instance or screen
-# coordinates) but not the JSON of an action: these builders are the one place that shape is written.
-# TODO(verify) every key below against the live server's inputSchema for user_keyboard_input / user_mouse_input.
+# The input tools' actions, as the live server's schemas give them: an ordered list of steps, each {"action": ...}.
+# Keyboard: keyDown / keyUp / keyPress with key_code (a Roblox KeyCode name), textInput with text_inputs (and an
+# optional instance_path, a TextBox), wait with wait_time_ms. Mouse: moveTo, mouseButtonDown / mouseButtonUp /
+# mouseButtonClick with mouse_button ("left" or "right": there is no middle button), scrollUp / scrollDown, wait; a
+# step without a position (x, y, or instance_path) needs an earlier step of the same call to have set one, so every
+# builder below that can carry one does. These builders are the one place that shape is written. Held keys stay down
+# between calls until their keyUp; the live server's synthetic right-drag doesn't turn Roblox's camera (the engine
+# turns it with execute_luau instead).
+MOUSE = ("left", "right")
+
 
 def key_action(kind, key):
     """kind: "down", "up" or "press"; key: a Roblox KeyCode name (W, Space, LeftShift, One...)."""
-    return {"type": {"down": "key_down", "up": "key_up", "press": "key_press"}[kind], "key": key}
+    return {"action": {"down": "keyDown", "up": "keyUp", "press": "keyPress"}[kind], "key_code": key}
 
 
 def text_action(text, target=None):
     """Type text, into a TextBox (`target`: its dot path) when given."""
-    out = {"type": "text_input", "text": text}
+    out = {"action": "textInput", "text_inputs": text}
     if target:
         out["instance_path"] = target
     return out
 
 
 def wait_action(seconds):
-    return {"type": "wait", "seconds": round(float(seconds), 3)}
+    return {"action": "wait", "wait_time_ms": max(0, min(10000, round(float(seconds) * 1000)))}
 
 
-def mouse_move(x, y):
-    """Move the mouse to viewport pixels (from the top left)."""
-    return {"type": "move", "x": round(x), "y": round(y)}
-
-
-def mouse_click(button="left", x=None, y=None, target=None):
-    """A click with a button ("left", "right", "middle") at viewport pixels, or on a GUI instance (`target`: its dot
-    path)."""
-    out = {"type": "click", "button": button}
+def _at(out, x=None, y=None, target=None):
     if target:
         out["instance_path"] = target
-    else:
-        out.update({"x": round(x or 0), "y": round(y or 0)})
+    elif x is not None and y is not None:
+        out.update({"x": round(x), "y": round(y)})
     return out
 
 
-def mouse_button(kind, button="left"):
-    """kind: "down" or "up"."""
-    return {"type": f"button_{kind}", "button": button}
+def mouse_move(x=None, y=None, target=None):
+    """Move the mouse to viewport pixels (from the top left), or onto a GUI instance (`target`: its dot path)."""
+    return _at({"action": "moveTo"}, x, y, target)
 
 
-def mouse_scroll(delta):
-    return {"type": "scroll", "delta": delta}
+def mouse_click(button="left", x=None, y=None, target=None):
+    """A click with a button ("left", "right") at viewport pixels, or on a GUI instance (`target`: its dot path)."""
+    return _at({"action": "mouseButtonClick", "mouse_button": button}, x, y, target)
+
+
+def mouse_button(kind, button="left", x=None, y=None):
+    """kind: "down" or "up", at viewport pixels (the server needs a position in each call)."""
+    return _at({"action": {"down": "mouseButtonDown", "up": "mouseButtonUp"}[kind], "mouse_button": button}, x, y)
+
+
+def mouse_scroll(up, x=None, y=None):
+    """One notch of the wheel, up (True) or down, at viewport pixels."""
+    return _at({"action": "scrollUp" if up else "scrollDown"}, x, y)
 
 
 class McpError(RuntimeError):
@@ -499,22 +513,35 @@ class Studio:
         schema = (self.client.tools.get(EXECUTE_LUAU) or {}).get("inputSchema") or {}
         return "studio_id" in (schema.get("required") or [])
 
-    def pick_studio(self):
-        """The one Studio the server is connected to (list_roblox_studios); several: AUTOPILOT_ROBLOX_STUDIO_ID must
-        say which."""
-        if not self.has(LIST_ROBLOX_STUDIOS):
-            return None
+    def studios(self):
+        """[(id, name)] of the Studios the server is connected to: list_roblox_studios, {"studios": [{"id", "name"}]}
+        on the live server."""
         found = parse_json(text_of(self.call(LIST_ROBLOX_STUDIOS, {})))
         studios = found if isinstance(found, list) else (found or {}).get("studios") if isinstance(found, dict) else []
         studios = [s for s in studios or [] if isinstance(s, dict)]
-        ids = [str(s.get("studio_id") or s.get("id") or s.get("studioId") or "") for s in studios]  # TODO(verify)
-        ids = [i for i in ids if i]
+        out = [(str(s.get("id") or s.get("studio_id") or s.get("studioId") or ""), str(s.get("name") or ""))
+               for s in studios]
+        return [(i, n) for i, n in out if i]
+
+    def pick_studio(self, wait=STUDIO_WAIT):
+        """The one Studio the server is connected to (list_roblox_studios, waiting up to `wait` seconds for Studio to
+        register with a server that just started); several: AUTOPILOT_ROBLOX_STUDIO_ID must say which."""
+        if not self.has(LIST_ROBLOX_STUDIOS):
+            return None
+        deadline = time.monotonic() + wait
+        found = self.studios()
+        while not found and time.monotonic() < deadline:
+            time.sleep(0.25)
+            found = self.studios()
+        ids = [i for i, _ in found]
         if len(ids) == 1:
             return ids[0]
         if not ids:
-            raise McpError("Roblox Studio isn't connected to its MCP server: open the place in Studio first")
-        raise McpError(f"the MCP server is connected to {len(ids)} Studios ({', '.join(ids)}): set {ENV_STUDIO_ID} "
-                       "to the one to play")
+            raise McpError("Roblox Studio isn't connected to its MCP server: open the place in Studio, and check "
+                           "Assistant > ... > Manage MCP Servers > 'Enable Studio as MCP server' is on")
+        raise McpError(f"the MCP server is connected to {len(ids)} Studios "
+                       f"({', '.join(f'{i} ({n})' if n else i for i, n in found)}): set {ENV_STUDIO_ID} to the one to "
+                       "play")
 
     def arg(self, tool, meaning):
         """The name `tool` takes for an argument meaning `meaning` (see ARGS)."""
@@ -543,12 +570,14 @@ class Studio:
         kind = (schema.get(name) or {}).get("type")
         if name in ("is_start", "start") or kind == "boolean":
             value = bool(start)
-        else:  # (a mode string: the open-source studio-rust-mcp-server's "start_play" / "stop")  TODO(verify)
+        else:  # (a mode string: the open-source studio-rust-mcp-server's "start_play" / "stop")
             value = "start_play" if start else "stop"
         return text_of(self.call(START_STOP_PLAY, {name: value}, timeout=timeout))
 
     def studio_state(self):
-        """What get_studio_state says (parsed JSON when it is JSON, else its text), or None without the tool."""
+        """What get_studio_state says (parsed JSON when it is JSON, else its text), or None without the tool. The live
+        server answers text lines: "- Current Studio Mode: Edit" (Play while a play session runs), "- Available
+        DataModels: Edit" (Client, Server), "- Focused DataModel in the viewport: Edit"."""
         if not self.has(GET_STUDIO_STATE):
             return None
         text = text_of(self.call(GET_STUDIO_STATE, {}))
@@ -556,16 +585,24 @@ class Studio:
         return parsed if parsed is not None else text
 
     def console_output(self):
-        """get_console_output's text."""
+        """get_console_output's text: Studio's Output window, a line a message, without each message's type (an error,
+        a warning and a print look alike), from before the play session too."""
         return text_of(self.call(GET_CONSOLE_OUTPUT, {}))
 
     def screen_capture(self, timeout=20):
-        """(bytes, mime) of the viewport, or (None, None) when the result has no image."""
-        return image_of(self.call(SCREEN_CAPTURE, {}, timeout=timeout))
+        """(bytes, mime) of the viewport (the live server: a JPEG image item), or (None, None) when the result has
+        none."""
+        self.captures = getattr(self, "captures", 0) + 1
+        return image_of(self.call(SCREEN_CAPTURE, {self.arg(SCREEN_CAPTURE, "id"): f"Autopilot_{self.captures}"},
+                                  timeout=timeout))
 
-    def search_game_tree(self, path=None, instance_type=None, keywords=None, depth=None, timeout=60):
+    def search_game_tree(self, path=None, instance_type=None, keywords=None, depth=None, datamodel="Edit",
+                         timeout=60):
+        """The instance tree under a path (Workspace, or game.Workspace), as JSON text, in a data model (Edit; Client
+        or Server while a play session runs: Edit is refused then)."""
         args = {}
-        for meaning, value in (("path", path), ("type", instance_type), ("keywords", keywords), ("depth", depth)):
+        for meaning, value in (("path", path), ("type", instance_type), ("keywords", keywords), ("depth", depth),
+                               ("datamodel", datamodel)):
             if value is not None:
                 args[self.arg(SEARCH_GAME_TREE, meaning)] = value
         return text_of(self.call(SEARCH_GAME_TREE, args, timeout=timeout))
@@ -574,8 +611,8 @@ class Studio:
         return text_of(self.call(INSPECT_INSTANCE, {self.arg(INSPECT_INSTANCE, "path"): path}))
 
     def script_read(self, path, timeout=30):
-        """A script's source by its dot path (game.ServerScriptService.Main). TODO(verify): whether the result has line
-        numbers in front of each line (they are taken off when every line has one)."""
+        """A script's source by its dot path (game.ServerScriptService.Main). The live server puts a line number in
+        front of each line ("     1→--!strict"); they are taken off."""
         return strip_line_numbers(text_of(self.call(SCRIPT_READ, {self.arg(SCRIPT_READ, "path"): path},
                                                     timeout=timeout)))
 
@@ -583,23 +620,22 @@ class Studio:
         return text_of(self.call(SCRIPT_GREP, {self.arg(SCRIPT_GREP, "pattern"): pattern}))
 
     def keyboard(self, actions, datamodel="Client"):
-        """Ordered keyboard actions: [{"type": "key_down"|"key_up"|"key_press"|"text"|"wait", "key"?, "text"?,
-        "seconds"?}] (key: a Roblox KeyCode name). TODO(verify) the action shape against the live schema."""
+        """Ordered keyboard actions (key_action, text_action, wait_action)."""
         return text_of(self.call(USER_KEYBOARD_INPUT, {self.arg(USER_KEYBOARD_INPUT, "actions"): actions,
                                                       self.arg(USER_KEYBOARD_INPUT, "datamodel"): datamodel}))
 
     def mouse(self, actions, datamodel="Client"):
-        """Ordered mouse actions: [{"type": "move"|"click"|"button_down"|"button_up"|"scroll"|"wait", "x"?, "y"?
-        (viewport pixels from the top left), "button"? ("left"/"right"/"middle"), "instance_path"?}]. TODO(verify) the
-        action shape against the live schema."""
+        """Ordered mouse actions (mouse_move, mouse_click, mouse_button, mouse_scroll, wait_action)."""
         return text_of(self.call(USER_MOUSE_INPUT, {self.arg(USER_MOUSE_INPUT, "actions"): actions,
                                                    self.arg(USER_MOUSE_INPUT, "datamodel"): datamodel}))
 
     def navigate(self, position=None, instance=None, speed=None, timeout=60):
-        """Walk the player's character to a position ({"x","y","z"} studs) or an instance (a dot path)."""
-        args = {}
+        """Walk the player's character to a position ({"x","y","z"} studs, sent as the tool's x, y and z) or an
+        instance (a dot path), in the Client data model. The live server answers once the walk ends."""
+        args = {self.arg(CHARACTER_NAVIGATION, "datamodel"): "Client"}
         if position is not None:
-            args[self.arg(CHARACTER_NAVIGATION, "position")] = position  # TODO(verify): an object or [x, y, z]?
+            for k in "xyz":
+                args[k] = float(position[k])
         if instance is not None:
             args[self.arg(CHARACTER_NAVIGATION, "instance")] = instance
         if speed is not None:
@@ -618,12 +654,12 @@ def parse_json(text):
 
 
 def strip_line_numbers(text):
-    """A script_read text without line numbers in front of its lines ("12: x" / "12\tx" / "  12 | x"), when every
-    non-empty line has one counting up from the first."""
+    """A script_read text without line numbers in front of its lines ("12: x" / "12\tx" / "  12 | x" / "    12→x", the
+    live server's), when every non-empty line has one counting up from the first."""
     import re
 
     lines = text.split("\n")
-    pat = re.compile(r"^\s*(\d+)\s*(?:[:|\t]\s?|\s)(.*)$")
+    pat = re.compile(r"^\s*(\d+)\s*(?:→|[:|\t]\s?|\s)(.*)$")
     out, expect = [], None
     for line in lines:
         if not line.strip():  # (an empty line, numbered or not)
@@ -631,7 +667,7 @@ def strip_line_numbers(text):
             if expect is not None:
                 expect += 1
             continue
-        m0 = re.match(r"^\s*(\d+)\s*[:|\t]?\s*$", line)
+        m0 = re.match(r"^\s*(\d+)\s*(?:→|[:|\t])?\s*$", line)
         if m0 and (expect is None or int(m0.group(1)) == expect):  # (a numbered empty line)
             out.append("")
             expect = int(m0.group(1)) + 1
@@ -656,30 +692,50 @@ def dot_path(path):
 
 # -- a stand-in for Studio's server (tests, tools/roblox_latency.py --fake) -------------------------------------------
 
-# The tools FakeStudio offers, with the argument names it advertises (the first guesses in ARGS)
+# The tools FakeStudio offers, with the arguments the live server advertises for them (docs/studio_tools.txt), and the
+# ones it requires. studio_id is the live server's too: FakeStudio requires it as that server does (it is connected to
+# one Studio, FAKE_STUDIO, which list_roblox_studios gives).
+_DM = {"type": "string", "enum": list(DATAMODELS)}
+_SID = {"studio_id": {"type": "string"}}
+_CLIENT = {"type": "string", "enum": ["Client"]}
 FAKE_SCHEMAS = {
-    EXECUTE_LUAU: {"code": {"type": "string"}, "datamodel_type": {"type": "string", "enum": list(DATAMODELS)}},
-    START_STOP_PLAY: {"is_start": {"type": "boolean"}},
-    GET_CONSOLE_OUTPUT: {},
-    GET_STUDIO_STATE: {},
-    SCREEN_CAPTURE: {},
-    SEARCH_GAME_TREE: {"path": {"type": "string"}, "instance_type": {"type": "string"},
-                       "max_depth": {"type": "integer"}},
-    INSPECT_INSTANCE: {"path": {"type": "string"}},
-    SCRIPT_READ: {"path": {"type": "string"}},
-    SCRIPT_GREP: {"pattern": {"type": "string"}},
-    USER_KEYBOARD_INPUT: {"actions": {"type": "array"}, "datamodel_type": {"type": "string"}},
-    USER_MOUSE_INPUT: {"actions": {"type": "array"}, "datamodel_type": {"type": "string"}},
-    CHARACTER_NAVIGATION: {"target_position": {"type": "object"}, "instance_path": {"type": "string"},
-                           "speed_multiplier": {"type": "number"}},
+    EXECUTE_LUAU: {"code": {"type": "string"}, "datamodel_type": _DM} | _SID,
+    START_STOP_PLAY: {"is_start": {"type": "boolean"}} | _SID,
+    GET_CONSOLE_OUTPUT: dict(_SID),
+    GET_STUDIO_STATE: dict(_SID),
+    SCREEN_CAPTURE: {"capture_id": {"type": "string"}, "camera_position": {"type": "array"},
+                     "look_at_position": {"type": "array"}} | _SID,
+    SEARCH_GAME_TREE: {"datamodel_type": _DM, "path": {"type": "string"}, "instance_type": {"type": "string"},
+                       "keywords": {"type": "string"}, "max_depth": {"type": "number"}} | _SID,
+    INSPECT_INSTANCE: {"path": {"type": "string"}} | _SID,
+    SCRIPT_READ: {"target_file": {"type": "string"}} | _SID,
+    SCRIPT_GREP: {"query": {"type": "string"}} | _SID,
+    USER_KEYBOARD_INPUT: {"actions": {"type": "array"}, "datamodel_type": _CLIENT} | _SID,
+    USER_MOUSE_INPUT: {"actions": {"type": "array"}, "datamodel_type": _CLIENT} | _SID,
+    CHARACTER_NAVIGATION: {"datamodel_type": _CLIENT, "instance_path": {"type": "string"},
+                           "speed_multiplier": {"type": "number"}, "x": {"type": "number"}, "y": {"type": "number"},
+                           "z": {"type": "number"}} | _SID,
+    LIST_ROBLOX_STUDIOS: {},
 }
+FAKE_REQUIRED = {
+    EXECUTE_LUAU: ["code", "datamodel_type", "studio_id"], START_STOP_PLAY: ["is_start", "studio_id"],
+    GET_CONSOLE_OUTPUT: ["studio_id"], GET_STUDIO_STATE: ["studio_id"], SCREEN_CAPTURE: ["capture_id", "studio_id"],
+    SEARCH_GAME_TREE: ["datamodel_type", "studio_id"], INSPECT_INSTANCE: ["path", "studio_id"],
+    SCRIPT_READ: ["target_file", "studio_id"], SCRIPT_GREP: ["query", "studio_id"],
+    USER_KEYBOARD_INPUT: ["actions", "datamodel_type", "studio_id"],
+    USER_MOUSE_INPUT: ["actions", "datamodel_type", "studio_id"],
+    CHARACTER_NAVIGATION: ["datamodel_type", "studio_id"],
+}
+FAKE_STUDIO = "fake-studio"
 
 
 class FakeStudio:
-    """An MCP server that stands in for StudioMCP: initialize, tools/list (FAKE_SCHEMAS, less `without`) and
-    tools/call, answered by handlers (name -> fn(arguments) returning a tools/call result, a string (its text) or
-    bytes (a PNG)). Every call is kept in `calls`. Without a handler a tool answers "ok"; execute_luau's default
-    answers what tests/robloxsim.py's place would not: an empty batch. serve_stdio() speaks MCP's stdio transport."""
+    """An MCP server that stands in for StudioMCP: initialize, tools/list (FAKE_SCHEMAS, less `without`; each tool
+    requiring what FAKE_REQUIRED says of the arguments its schema has) and tools/call, answered by handlers (name ->
+    fn(arguments) returning a tools/call result, a string (its text) or bytes (a PNG)). A call without an argument its
+    tool requires fails, as on the live server. Every call is kept in `calls`. Without a handler a tool answers "ok";
+    list_roblox_studios's default is one Studio (FAKE_STUDIO); execute_luau's default answers what
+    tests/robloxsim.py's place would not: an empty batch. serve_stdio() speaks MCP's stdio transport."""
 
     def __init__(self, handlers=None, without=(), schemas=None, name="FakeStudio"):
         self.handlers = dict(handlers or {})
@@ -689,9 +745,14 @@ class FakeStudio:
         self.lock = threading.Lock()
         self.initialized = False
 
+    def required(self, name):
+        props = self.schemas.get(name) or {}
+        return [r for r in FAKE_REQUIRED.get(name, []) if r in props]
+
     def tool_list(self):
         return [{"name": n, "description": f"(fake) {n}",
-                 "inputSchema": {"type": "object", "properties": props}} for n, props in self.schemas.items()]
+                 "inputSchema": {"type": "object", "properties": props, "required": self.required(n)}}
+                for n, props in self.schemas.items()]
 
     def handle(self, msg):
         method, rid = msg.get("method"), msg.get("id")
@@ -713,6 +774,9 @@ class FakeStudio:
                     return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": f"unknown tool {name}"}}
                 with self.lock:
                     self.calls.append((name, args))
+                missing = [r for r in self.required(name) if r not in args]
+                if missing:
+                    raise ValueError(f"{', '.join(missing)} is required")
                 result = self._result(self.handlers.get(name, self._default(name))(args))
             elif method == "ping":
                 result = {}
@@ -740,6 +804,8 @@ class FakeStudio:
                     time.sleep(float(code.split("--fake-sleep:", 1)[1].split()[0]))
                 return json.dumps({"t": 0.0, "r": []})
             return run
+        if name == LIST_ROBLOX_STUDIOS:
+            return lambda args: json.dumps({"studios": [{"id": FAKE_STUDIO, "name": f"{self.name}.rbxlx"}]})
         return lambda args: "ok"
 
     def count(self, name):

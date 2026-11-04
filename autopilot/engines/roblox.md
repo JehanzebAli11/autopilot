@@ -52,9 +52,10 @@ the others. Plan for that (see **Limits**).
   `workspace.FallenPartsDestroyHeight` dies and respawns (`pose()` says `fallen`). To name another character as the
   player: `game.request("context", {"player": "Workspace/<Model>"})`.
 - **Input.** Keys use the kit's names (`W`, `SpaceBar`, `E`, `LeftShift`...), turned into Roblox KeyCodes and sent with
-  Studio's keyboard tool. Mouse buttons click where the pointer is (`game.pointer(...)`, else the middle of the view).
-  `game.mouse` / `game.turn` turn the camera as a Roblox player does, by dragging with the right button held, so
-  `game.calibrate_look()` works as usual. A ProximityPrompt (`view`'s `prompt`: its key, action and range) fires when
+  Studio's keyboard tool. Mouse buttons (left and right: there is no middle button) click where the pointer is
+  (`game.pointer(...)`, else the middle of the view). `game.mouse` / `game.turn` turn the camera (half a degree a
+  count, set in the player's client, where Roblox's camera carries on from it), so `game.calibrate_look()` works as
+  usual. A ProximityPrompt (`view`'s `prompt`: its key, action and range) fires when
   its key is held near it for its `hold` time. `game.ui()` lists PlayerGui's buttons and text boxes, and
   `game.ui_act(id=...)` clicks one or types into it. `game.screen()` keys PlayerGui's texts as `<ScreenGui>.<name>`.
   `game.request("move", {"to": kit point})` (or `{"object": path}`, or `{"direction": kit vector, "seconds": s}`)

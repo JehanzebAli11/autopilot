@@ -709,6 +709,24 @@ function O.ui(a)
 	return { elements = out }
 end
 
+-- Turn the camera by degrees (yaw: right, pitch: up), in the player's client: its look is set, and Roblox's camera
+-- scripts carry on from it (they read the camera's look every frame), as after a right-drag. Pitch stays within 80
+-- degrees of level, as Roblox's default camera keeps it.
+function O.turn(a)
+	local cam = workspace.CurrentCamera
+	if not cam then
+		error("turn: no camera", 0)
+	end
+	local cf = cam.CFrame
+	local l = cf.LookVector
+	local yaw = math.atan2(-l.X, -l.Z) - (tonumber(a.yaw) or 0) / DEG
+	local limit = 80 / DEG
+	local pitch = math.clamp(math.asin(math.clamp(l.Y, -1, 1)) + (tonumber(a.pitch) or 0) / DEG, -limit, limit)
+	local look = Vector3.new(-math.sin(yaw) * math.cos(pitch), math.sin(pitch), -math.cos(yaw) * math.cos(pitch))
+	cam.CFrame = CFrame.lookAt(cf.Position, cf.Position + look)
+	return { look = v3(look), yaw = num(-yaw * DEG), pitch = num(pitch * DEG) }
+end
+
 -- Where a world point or an instance is on the viewport: pixels from its top left
 function O.point(a)
 	local cam = workspace.CurrentCamera
