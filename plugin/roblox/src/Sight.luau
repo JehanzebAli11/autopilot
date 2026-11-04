@@ -206,8 +206,9 @@ local function adornment(d: Instance): Instance?
 		if h.Enabled and (h.FillTransparency < 1 or h.OutlineTransparency < 1) then
 			return h.Adornee or h.Parent
 		end
-	elseif d:IsA("PVAdornment") then
-		local a = d :: PVAdornment
+	elseif d:IsA("PVAdornment") or d:IsA("InstanceAdornment") then
+		-- (handle adornments are PVAdornments; SelectionBox and SelectionSphere are InstanceAdornments)
+		local a = d :: any
 		if a.Visible and a.Transparency < 1 then
 			return a.Adornee
 		end
@@ -704,7 +705,8 @@ function Sight.view(args: any): (boolean, any)
 	-- (Reach.addOpenings); a game that never asks pays nothing
 	local wantOpenings = args.openings == true
 	local wantWaysUp = args.ways_up == true
-	local openingsReach = math.max(100, tonumber(args.openings_reach) or 3000)
+	-- (at most 25000: Roblox's Blockcast goes no farther than 1024 studs)
+	local openingsReach = math.clamp(tonumber(args.openings_reach) or 3000, 100, 25000)
 	local only = args.only
 	local isOnly = type(only) == "table"
 	local onlySet: { [string]: boolean }? = nil

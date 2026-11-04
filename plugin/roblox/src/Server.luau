@@ -42,7 +42,11 @@ function Server.start(plugin: Plugin)
 			return true, { asked = n }
 		end,
 		find = function(args)
-			return true, World.find(args)
+			local out, why = World.find(args)
+			if why then
+				return false, why, 400
+			end
+			return true, out
 		end,
 		transforms = function(args)
 			return true, World.transforms(args, Paths.resolve)

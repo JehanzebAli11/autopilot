@@ -388,10 +388,13 @@ function Detectors:_teleports(dt: number)
 		end
 		local speed = part.AssemblyLinearVelocity.Magnitude * S
 		local track = self.bodies[model]
-		if track == nil or track.root ~= part then -- (new, or respawned: a new root part)
-			self.bodies[model] = { root = part, at = pos, frames = 1, speed = speed }
+		local clock = os.clock()
+		-- (new, respawned (a new root part), or not looked at for a while: off, paused, a hitch: tracked afresh)
+		if track == nil or track.root ~= part or clock - (track.seen or clock) > 0.5 then
+			self.bodies[model] = { root = part, at = pos, frames = 1, speed = speed, seen = clock }
 			continue
 		end
+		track.seen = clock
 		if track.frames > 5 then
 			local allowed = math.max(least, factor * math.max(speed, track.speed) * dt)
 			local moved = (pos - track.at).Magnitude * S

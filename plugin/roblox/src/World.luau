@@ -162,13 +162,26 @@ local function isClassName(cls: string): boolean
 	return not ok or c ~= nil
 end
 
+-- Kinds that a find has matched this session (a tag, a script's name, a class): one that matches nothing now (every
+-- lantern collected, a streamed-out part) is still a kind, and finds nothing rather than a 400
+local seenKinds: { [string]: boolean } = {}
+
 -- `find`: {"class"?, "name"?, "limit"? (10000), "things"?} -> {"objects": [paths]}; also why, for a class nothing is
--- (no Roblox class, tag or script of that name: the op answers 400).
+-- (no Roblox class, tag or script of that name, nor one seen before: the op answers 400).
 function World.find(args: any): (any, string?)
 	local cls = tostring(args.class or "")
 	local name = string.lower(tostring(args.name or ""))
 	local limit = tonumber(args.limit) or 10000
-	local known = cls == "" or string.sub(cls, 1, 4) == "tag:" or isClassName(cls)
+	local asked = cls
+	local known = cls == "" or string.sub(cls, 1, 4) == "tag:" or seenKinds[cls] == true or isClassName(cls)
+	if not known then
+		local ok, tags = pcall(function()
+			return CollectionService:GetAllTags()
+		end)
+		if ok and table.find(tags, cls) then
+			known = true
+		end
+	end
 	local out = {}
 	local candidates: { Instance }
 	if string.sub(cls, 1, 4) == "tag:" then
@@ -210,6 +223,9 @@ function World.find(args: any): (any, string?)
 			table.insert(out, p)
 		end
 	end
+	if #out > 0 and asked ~= "" then
+		seenKinds[asked] = true
+	end
 	if #out == 0 and not known then
 		-- (no class and no tag of that name: a script of that name, anywhere the search walks, makes it a kind)
 		for _, s in ipairs(World.SERVICES) do
@@ -217,6 +233,7 @@ function World.find(args: any): (any, string?)
 			if svc then
 				for _, d in ipairs(svc:GetDescendants()) do
 					if d.Name == cls and d:IsA("LuaSourceContainer") then
+						seenKinds[asked] = true
 						return { objects = out }, nil
 					end
 				end

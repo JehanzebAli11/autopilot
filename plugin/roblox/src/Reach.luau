@@ -220,10 +220,23 @@ function Probe.sweep(self: any, fromFeet: Vector3, toFeet: Vector3): any
 	end
 	local level = Vector3.new(d.X, 0, d.Z)
 	local cf = if level.Magnitude > 1e-3 then CFrame.lookAt(o, o + level) else CFrame.new(o)
-	local ok, r = pcall(function()
-		return workspace:Blockcast(cf, Vector3.new(width, height, width) / S, d, self.params)
-	end)
-	if not ok or r == nil then
+	-- (Blockcast goes at most 1024 studs: a longer sweep is cast in pieces, so a far wall isn't taken for nothing)
+	local total = d.Magnitude
+	local dir = d.Unit
+	local done = 0
+	local r = nil
+	while done < total do
+		local len = math.min(1000, total - done)
+		local ok, hit = pcall(function()
+			return workspace:Blockcast(cf + dir * done, Vector3.new(width, height, width) / S, dir * len, self.params)
+		end)
+		if ok and hit then
+			r = hit
+			break
+		end
+		done += len
+	end
+	if r == nil then
 		return nil
 	end
 	return { at = K(r.Position), instance = r.Instance }
