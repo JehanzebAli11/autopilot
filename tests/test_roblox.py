@@ -341,3 +341,40 @@ def test_the_detectors_work_only_while_a_run_uses_the_game():
     assert "if not self.active then" in detectors and "if not self.active or not self.enabled" in detectors
     editor = sources["Editor"]
     assert editor.count("run_active = self.runActive") == 2 and 'type = "run", active = self.runActive' in editor
+
+
+def test_the_detectors_as_godots_teleport_actor_growth_over_max():
+    """As Godot's detectors.gd: the same severities and thresholds; teleport, actor_growth and over_max on the server
+    only (one finding each, every character, no streaming), with Godot's rules and shapes; no clamp (documented)."""
+    detectors = _sources()["Detectors"]
+    for key in ("teleport_factor = 3.0", "teleport_min = 1000.0", "growth_seconds = 120.0", "property_every = 0.5"):
+        assert key in detectors, key
+    for name in ("long_fall", "out_of_world", "hud_fraction"):
+        assert f'detector = "{name}", severity = "warning"' in detectors, name
+    assert 'detector = "teleport", severity = "suspicion"' in detectors and '"teleport:" .. kind' in detectors
+    assert "from = kit1(track.at), to = kit1(pos), moved = " in detectors
+    assert "allowed = math.round(allowed)" in detectors
+    assert "track.frames > 5" in detectors and "track.root ~= part" in detectors  # (5 frames; a respawn's new root)
+    assert "AssemblyLinearVelocity.Magnitude * S" in detectors and 'FindFirstChild("HumanoidRootPart")' in detectors
+    assert "math.max(least, factor * math.max(speed, track.speed) * dt)" in detectors
+    assert 'detector = "actor_growth", severity = "warning"' in detectors and "World.things()" in detectors
+    assert "details = { from = first, to = last, seconds = self.config.growth_seconds }" in detectors
+    assert "last < 2 * first or last - first < 50" in detectors and "GROWTH_EVERY = 10" in detectors
+    assert 'detector = "over_max", severity = "warning"' in detectors
+    assert "details = { property = property, value = v, max_property = maxProperty, max = mx }" in detectors
+    for pattern in ('"max_" .. n', 'n .. "_max"', '"Max" .. pascal', 'n .. "Max"', '"Max_" .. n', 'n .. "_Max"'):
+        assert pattern in detectors, pattern
+    assert "CollectionService:GetTags(inst)" in detectors and 'string.gsub(inst.Name, "%d+", "#")' in detectors
+    # (the server's only, at a bounded cost: no descendant walk a frame for them)
+    assert "self.server = RunService:IsServer()" in detectors and "if self.server then" in detectors
+    assert "SWEEP_BUDGET = 500" in detectors and "DescendantAdded:Connect" in detectors
+    tick = detectors[detectors.index("function Detectors:tick("):detectors.index("function Detectors:_hud(")]
+    assert "GetDescendants" not in tick
+    readme = open(os.path.join(ROOT, "plugin", "roblox", "README.md"), encoding="utf-8").read()
+    row = next(line for line in readme.splitlines() if line.startswith("| `detectors` |"))
+    assert row.startswith("| `detectors` | Only while a run uses the game")
+    for word in ("`teleport`", "`actor_growth`", "`over_max`", "No `clamp`", "`teleport_factor`", "`teleport_min`",
+                 "`growth_seconds`", "`property_every`", "suspicion", "leaderstats"):
+        assert word in row, word
+    guide = open(os.path.join(ROOT, "autopilot", "engines", "roblox.md"), encoding="utf-8").read()
+    assert "teleports" in guide and "actor growth" in guide and "No `clamp`" in guide

@@ -107,4 +107,9 @@
   falling, state, health, standing_on, touching, floor slope) and, with `sonar=True`, the sonar ways. It has no `held`,
   `openings`, `ways_up` or `lane` (listed in its `omitted`): `walk_to` finds no way up to a raised goal by itself, so
   walk it to a ramp's or stairs' foot and top first. Detectors: errors and warnings the game's scripts print (server
-  and client), NaN positions, parts falling out of the world, long falls, hitches, on-screen counts above their maximum.
+  and client), NaN positions, parts falling out of the world, long falls, hitches, on-screen counts above their maximum,
+  and on the server teleports (a character, the player's or an NPC's, jumping farther in a frame than its speed allows;
+  a suspicion, and your own `set` of a position is one too), actor growth (the Workspace's things of one kind, by tag
+  or name, still growing after 120 s) and numbers over their maximum (an attribute or IntValue/NumberValue above its
+  sibling `Max<Name>`, `max_<name>`, `<Name>Max`, `<name>_max`..., leaderstats too).  No `clamp`: Roblox declares no
+  ranges.
