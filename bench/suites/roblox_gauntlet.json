@@ -1,0 +1,17 @@
+{
+ "note": "Prompts for examples/roblox_gauntlet (Prism Gauntlet: open its built place in Roblox Studio with Studio's MCP server on, then run bench/run_autopilot.py --project examples/roblox_gauntlet --suite bench/suites/roblox_gauntlet.json --agent claude).Each 'expected' is what the place's code does: src/shared/Config.luau for the numbers, src/server/Rules.luau for what kills, respawns, counts and finishes, src/server/Course.luau for how each stage is built, src/client/Motion.client.luau for the moving platforms, src/client/Hud.client.luau for the HUD. Five of the twelve are claims that come out DENIED, so saying yes to everything can't score. A verify prompt may use the Debug helpers to set up its check; the goal prompts are played with the player's own inputs.",
+ "prompts": [
+  {"id": "A", "prompt": "Verify that after reaching the first checkpoint, falling into the void respawns the player on that checkpoint's island", "expected": "CONFIRMED"},
+  {"id": "B", "prompt": "Verify that the three laser gates in the Laser Hall switch on and off together, in sync", "expected": "DENIED"},
+  {"id": "C", "prompt": "Verify that a Laser Hall gate doesn't hurt the player while it is switched off", "expected": "CONFIRMED"},
+  {"id": "D", "prompt": "Verify that a Crumble Bridge tile falls away about half a second after the player steps on it", "expected": "CONFIRMED"},
+  {"id": "E", "prompt": "Verify that a tile on the Crumble Bridge never comes back once it has fallen", "expected": "DENIED"},
+  {"id": "F", "prompt": "Verify that the belt on the Conveyor Climb carries the player up the ramp", "expected": "DENIED"},
+  {"id": "G", "prompt": "Verify that a player standing still on a Drift platform is carried across the void with it", "expected": "CONFIRMED"},
+  {"id": "H", "prompt": "Verify that all the Phase Shift blocks are solid at the same time", "expected": "DENIED"},
+  {"id": "I", "prompt": "Verify that each death adds one to the Deaths counter on the HUD", "expected": "CONFIRMED"},
+  {"id": "J", "prompt": "Verify that dying after reaching a checkpoint lowers the player's Stage on the leaderboard", "expected": "DENIED"},
+  {"id": "K", "prompt": "Verify that crossing the finish line marks the run as Finished on the HUD", "expected": "CONFIRMED"},
+  {"id": "L", "prompt": "Reach the checkpoint after the Laser Hall, playing with the player's own inputs (no Debug helpers, no moving the character directly)", "expected": "achieved"}
+ ]
+}
