@@ -1,8 +1,8 @@
 // The Autopilot window's Settings page: how Autopilot runs (the account card: Aura, the Aura app, BYOK, or not set up,
 // from the agent service's account frame and preferences.json), this project's runs and, for runs through Aura, what
-// Autopilot billed (the project's total and run by run), whether runs' data is shared, how to run Autopilot from
-// the user's own Claude Code or Codex, and Remove Autopilot (AutopilotView.Remove.cs; AutopilotView.cs has the rest
-// of the window).
+// Autopilot billed (the project's total and run by run), whether runs' data is shared, whether runs use the research
+// agent, how to run Autopilot from the user's own Claude Code or Codex, and Remove Autopilot (AutopilotView.Remove.cs;
+// AutopilotView.cs has the rest of the window).
 
 using System;
 using System.Collections.Generic;
@@ -23,11 +23,12 @@ namespace Autopilot.Playtest.Editor
         string SettingsKey()
         {
             var share = Preferences.Current.ShareData;
+            var research = Preferences.Current.ResearchAgent;
             var client = EditorHost.Client;
             var prefs = Preferences.Current;
-            return $"settings|{Wide}|{AutopilotUsage.Version}|{SelectedId}|{share}|{client != null && client.Connected}|{client != null && client.RunActive}|" +
+            return $"settings|{Wide}|{AutopilotUsage.Version}|{SelectedId}|{share}|{research}|{client != null && client.Connected}|{client != null && client.RunActive}|" +
                    $"{client?.AccountVersion}|{client != null && client.CanSignIn}|{SigningIn}|{signOutConfirm}|{setupProblem}|{prefs.Access}|{PlaytestSettings.Get().UseWithAura}|{removeConfirm}|" +
-                   $"{AgentService.Current}|{AgentService.Version}";
+                   $"{AgentService.Current}|{AgentService.Version}|{PlaytestSettings.Get().ShowPolicyLog}";
         }
 
         void BuildSettings()
@@ -42,6 +43,9 @@ namespace Autopilot.Playtest.Editor
             box.Add(AccountCorner());
             box.Add(UsageCard());
             box.Add(SharingCard());
+            box.Add(ResearchCard());
+            box.Add(BriefCard());
+            box.Add(PolicyLogCard());
             box.Add(AssistantsCard());
             box.Add(RemoveCard());
             if (offset != Vector2.zero) scroll.schedule.Execute(() => scroll.scrollOffset = offset);
@@ -118,9 +122,9 @@ namespace Autopilot.Playtest.Editor
         /// <summary>The words beside the sharing switch, as it is now: "Data sharing on" / "Data sharing off".</summary>
         public static string ShareState(bool on) => on ? "Data sharing on" : "Data sharing off";
 
-        /// <summary>A setting's card (Share runs, Autopilot in Claude Code &amp; Codex): its title (mono capitals),
-        /// the line under it (as the sharing text: small, t-sec2), then its control (the box returned), the same
-        /// gaps in each (.setting in Autopilot.uss).</summary>
+        /// <summary>A setting's card (Share runs, Research agent, Autopilot in Claude Code &amp; Codex): its title
+        /// (mono capitals), the line under it (as the sharing text: small, t-sec2), then its control (the box
+        /// returned), the same gaps in each (.setting in Autopilot.uss).</summary>
         static VisualElement SettingCard(string title, string line, string classes, out VisualElement control)
         {
             var card = Card("plate card-sec setting " + classes);
@@ -153,6 +157,97 @@ namespace Autopilot.Playtest.Editor
             return toggle;
         }
 
+        public const string ResearchTitle = "Research agent";
+        public const string ResearchLine = "Enabling the research agent allows Autopilot to achieve more difficult goals with fewer attempts, but at a higher cost.";
+
+        /// <summary>The words beside the research agent switch, as it is now: "Research agent on" / "Research agent
+        /// off".</summary>
+        public static string ResearchState(bool on) => on ? "Research agent on" : "Research agent off";
+
+        /// <summary>What the research agent switch shows: the user's choice (preferences.json's research_agent) when
+        /// made; else what the agent service does by default: off for runs through the Aura app (Use with Aura), on
+        /// for this plugin's own agent service (signed in to Aura or with the user's own keys).</summary>
+        public static bool ResearchShown(bool? chosen, bool useWithAura)
+        {
+            return chosen ?? !useWithAura;
+        }
+
+        /// <summary>Whether runs use the research agent (ResearchShown): the sharing card's look, its switch.</summary>
+        VisualElement ResearchCard()
+        {
+            var card = SettingCard(ResearchTitle, ResearchLine, "research", out var control);
+            control.Add(ResearchSwitch(ResearchShown(Preferences.Current.ResearchAgent, PlaytestSettings.Get().UseWithAura), SetResearch));
+            return card;
+        }
+
+        /// <summary>The research agent switch, as the sharing one: its words (ResearchState) right of the pill;
+        /// <paramref name="changed"/> gets each new value.</summary>
+        public static Toggle ResearchSwitch(bool on, Action<bool> changed)
+        {
+            var toggle = Switch(ResearchState(on), on);
+            toggle.AddToClassList("research-toggle");
+            toggle.tooltip = ResearchTitle;
+            toggle.RegisterValueChangedCallback(e =>
+            {
+                toggle.text = ResearchState(e.newValue);
+                changed(e.newValue);
+            });
+            return toggle;
+        }
+
+        public const string BriefTitle = "Design brief";
+        public const string BriefLine = "How the game is meant to work: the design, the rules players are told (e.g. “the player has three lives; each coin is worth 10 points”). Explorations report behavior that differs from it as a bug, even where the game’s own values agree with each other. Optional; sent with every run.";
+        public const string BriefPlaceholder = "How the game is meant to work";
+
+        /// <summary>The Design Brief (PlaytestSettings.DesignBrief, as Unreal's): sent with every run from the composer
+        /// and with an Explore run; saved as it is typed.</summary>
+        static VisualElement BriefCard()
+        {
+            var card = SettingCard(BriefTitle, BriefLine, "brief", out var control);
+            var s = PlaytestSettings.Get();
+            var field = Field(s.DesignBrief, true, v =>
+            {
+                s.DesignBrief = v;
+                s.Save();
+            }, BriefPlaceholder);
+            field.AddToClassList("brief-field");
+            control.Add(field);
+            return card;
+        }
+
+        public const string PolicyLogTitle = "Policy log";
+        public const string PolicyLogLine = "Show every policy step on the Policy log tab: the observation, the action probabilities, the action taken and how long it took. An agent service on this computer sends them. Applies from the next connection.";
+
+        /// <summary>The words beside the policy log switch, as it is now.</summary>
+        public static string PolicyLogState(bool on) => on ? "Policy log shown" : "Policy log hidden";
+
+        /// <summary>Show Policy Log (PlaytestSettings.ShowPolicyLog, as Unreal's): whether the hello asks for the policy
+        /// steps (`inspect`); a change connects again when no run is going, as sharing does.</summary>
+        static VisualElement PolicyLogCard()
+        {
+            var card = SettingCard(PolicyLogTitle, PolicyLogLine, "policy-log", out var control);
+            var s = PlaytestSettings.Get();
+            var toggle = Switch(PolicyLogState(s.ShowPolicyLog), s.ShowPolicyLog);
+            toggle.AddToClassList("share-toggle");
+            toggle.tooltip = "Show Policy Log";
+            toggle.RegisterValueChangedCallback(e =>
+            {
+                toggle.text = PolicyLogState(e.newValue);
+                SetShowPolicyLog(e.newValue);
+            });
+            control.Add(toggle);
+            return card;
+        }
+
+        internal static void SetShowPolicyLog(bool on)
+        {
+            var s = PlaytestSettings.Get();
+            if (s.ShowPolicyLog == on) return;
+            s.ShowPolicyLog = on;
+            s.Save();
+            Reconnect();
+        }
+
         public const string AssistantsTitle = "Autopilot in Claude Code & Codex";
         public const string AssistantsLine = "One-time CLI setup to run Autopilot through Claude Code or Codex using your Claude or ChatGPT subscriptions, respectively.";
         /// <summary>What sets up the user's own Claude Code and Codex (autopilot/connect.py), one row each.</summary>
@@ -182,8 +277,18 @@ namespace Autopilot.Playtest.Editor
             Reconnect();
         }
 
+        /// <summary>The switch flipped: the user's choice from now on (saved even when none was made before, so it no
+        /// longer follows the account).</summary>
+        static void SetResearch(bool research)
+        {
+            if (Preferences.Current.ResearchAgent == research) return;
+            if (!Preferences.Update(new Dictionary<string, object> { ["research_agent"] = research }))
+                AutopilotStatus.Say(AutopilotStatus.SetupNotSaved(Preferences.DefaultPath, Preferences.LastError));
+            Reconnect();
+        }
+
         /// <summary>Connect again (when connected and no run is going) so the agent service gets the new choices.</summary>
-        static void Reconnect()
+        internal static void Reconnect()
         {
             var client = EditorHost.Client;
             if (client == null || !client.Connected || client.RunActive) return;

@@ -20,6 +20,9 @@ namespace PlaytestOps
 
 	/** Every frame: keys held through the `key` op stay down, held axes send their value, leases run out. */
 	void TickKeys(UPlaytestSubsystem& Bridge, float DeltaTime);
+
+	/** How the player's inputs reach the game: context's and hello's `input` (PlaytestOpsSession.cpp). */
+	TSharedRef<FJsonObject> InputInfo();
 }
 
 /** The game's code for a brain that can't read this machine's disk (docs/protocol.md: `codex_manifest`, `codex_read`). */
@@ -73,6 +76,13 @@ namespace PlaytestUI
 	 * Events go straight to the widgets, so this works headless too. Returns "" or what went wrong.
 	 */
 	FString Act(UWorld* World, const TSharedPtr<FJsonObject>& Args);
+
+	/**
+	 * The id of the element at a pixel of the game's view (Size: the view's size in pixels), the topmost there, as
+	 * the game's widgets are laid out over the view (computed here: a game that doesn't render lays nothing out);
+	 * "" when none. For the pointer's clicks on a game that doesn't render (PlaytestOpsPointer.cpp).
+	 */
+	FString ElementAt(UWorld* World, const FVector2D& Pixel, const FVector2D& Size);
 }
 
 class FPlaytestMediaRender;
@@ -179,12 +189,36 @@ private:
 	void CheckGrowth(UWorld* World, double GameTime);
 	void CheckProperties(UWorld* World, double GameTime);
 	void CheckHud(UWorld* World, double GameTime);
-	void CheckObjectProperties(UObject* Object, const AActor* Actor, double GameTime);
 	bool IsProjectClass(const UClass* Class) const;
+
+	/** One numeric property CheckProperties reads on each object of a class: its name, its ClampMin/ClampMax, and its
+	 *  Max partner (MaxHealth for Health, HealthMax for Health), each found once per class. */
+	struct FPropertyCheck
+	{
+		const FProperty* Property = nullptr;
+		FString Name;
+		FString Min;  // ClampMin as written ("" none)
+		FString Max;
+		TOptional<double> MinValue;
+		TOptional<double> MaxValue;
+		const FProperty* MaxProperty = nullptr;
+		FString MaxName;
+	};
+	/** What CheckProperties reads on the objects of one class (none: not the game's own class, or no numbers). */
+	struct FClassChecks
+	{
+		TArray<FPropertyCheck> Properties;
+	};
+	/** A class's checks, made on its first object of this sweep. They hold FProperty pointers, which a Blueprint
+	 *  compile frees: kept for one sweep only (one call, so nothing compiles in between). */
+	const FClassChecks& ChecksOf(const UClass* Class, TMap<const UClass*, FClassChecks>& Plans, TMap<const UClass*, bool>& Project) const;
+	bool IsProjectClassCached(const UClass* Class, TMap<const UClass*, bool>& Project) const;
+	void CheckObjectProperties(const FClassChecks& Checks, UObject* Object, const AActor* Actor, double GameTime);
 
 	UPlaytestSubsystem& Bridge;
 	TMap<FString, int32> Seen;  // signature -> times seen
 	TWeakObjectPtr<UWorld> World;
+	FDelegateHandle ActorDestroyedHandle;  // on World (removed by Reset)
 	double SessionStartReal = 0;
 	double LastGameTime = -1;
 	double NextActorCheck = 0;

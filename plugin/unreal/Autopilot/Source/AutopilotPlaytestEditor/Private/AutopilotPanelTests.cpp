@@ -5,6 +5,7 @@
 // end of a run: the memory line, the recording kept and copied, or why there is none (Editor.RunEnd); steering only while the game plays, its
 // Rollout (Editor.Steer, and the Live page's steer row in Editor.Layout).
 
+#include "Settings/EditorExperimentalSettings.h"
 #include "Editor.h"
 #include "Editor/EditorPerformanceSettings.h"
 #include "Fonts/FontMeasure.h"
@@ -2478,14 +2479,17 @@ bool FAutopilotRunStartedTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the session's runs as they were"), Session.Runs.Num(), RunsBefore);
 	Session.AgentStartedRunId = AgentRunBefore;
 
-	// The Settings page: the card after Data sharing, before Uninstall
+	// The Settings page: the card after Data sharing and the Research agent, before Uninstall
 	TSharedRef<SWidget> SettingsPage = Panel->MakeSettings();
 	Panel->RebuildSettings();
 	const FString Words = Shown(SettingsPage, 600.f, 3000.f);
 	const int32 Share = Words.Find(TEXT("Share runs to improve Autopilot"));
+	const int32 Research = Words.Find(TEXT("Research agent"), ESearchCase::CaseSensitive);
 	const int32 Title = Words.Find(TEXT("Autopilot in Claude Code & Codex"), ESearchCase::IgnoreCase);
 	const int32 Uninstall = Words.Find(TEXT("Uninstall Autopilot"));
-	TestTrue(TEXT("settings: the card, after Data sharing and before Uninstall"), Share != INDEX_NONE && Title > Share && Uninstall > Title);
+	TestTrue(TEXT("settings: Data sharing, then the Research agent"), Share != INDEX_NONE && Research > Share);
+	TestTrue(TEXT("settings: the card, after the Research agent and before Uninstall"), Title > Research && Uninstall > Title);
+	TestTrue(TEXT("settings: what the research agent does, and its cost"), Words.Contains(TEXT("Enabling the research agent allows Autopilot to achieve more difficult goals with fewer attempts, but at a higher cost.")));
 	TestTrue(TEXT("settings: what sharing sends, and for these runs"), Words.Contains(TEXT("Enabling this sends recordings, screenshots, and agent traces and memories to the developers of Autopilot. For runs from your own Claude Code or Codex, the agent traces are its conversation during the run.")));
 	const TCHAR* CardWords[] = {
 		TEXT("One-time CLI setup to run Autopilot through Claude Code or Codex using your Claude or ChatGPT subscriptions, respectively."),
@@ -2545,7 +2549,7 @@ namespace
 	}
 }
 
-// The Settings page's sharing and Claude Code & Codex plates are built alike: the name (the mono
+// The Settings page's sharing, research agent and Claude Code & Codex plates are built alike: the name (the mono
 // micro-label), what it does (in the sharing text's font: Body 12), then what changes it (the switch alone, its name
 // the tooltip; the two commands with Copy), 6 px under the name and 10 px under the words
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutopilotSettingCardsTest, "AutopilotPlaytest.Editor.SettingCards",
@@ -2562,6 +2566,7 @@ bool FAutopilotSettingCardsTest::RunTest(const FString& Parameters)
 	TSharedRef<SPlaytestPanel> Panel = SNew(SPlaytestPanel).KeysDir(Dir.Path);
 	Panel->Prefs.bOnboarded = true;
 	Panel->Prefs.bShareData = false;
+	Panel->Prefs.ResearchChoice = false;
 	struct FCase
 	{
 		const TCHAR* Name;
@@ -2574,6 +2579,9 @@ bool FAutopilotSettingCardsTest::RunTest(const FString& Parameters)
 		{ TEXT("sharing"), Panel->MakeDataSharing(), TEXT("Share runs to improve Autopilot"),
 			TEXT("Enabling this sends recordings, screenshots, and agent traces and memories to the developers of Autopilot. For runs from your own Claude Code or Codex, the agent traces are its conversation during the run."),
 			TEXT("Data sharing off") },
+		{ TEXT("research agent"), Panel->MakeResearchAgent(), TEXT("Research agent"),
+			TEXT("Enabling the research agent allows Autopilot to achieve more difficult goals with fewer attempts, but at a higher cost."),
+			TEXT("Research agent off") },
 		{ TEXT("Claude Code & Codex"), Panel->MakeCodingAgents(), TEXT("Autopilot in Claude Code & Codex"),
 			TEXT("One-time CLI setup to run Autopilot through Claude Code or Codex using your Claude or ChatGPT subscriptions, respectively."),
 			TEXT("autopilot connect claude | Copy | autopilot connect codex | Copy") },
@@ -2651,6 +2659,29 @@ bool FAutopilotSettingCardsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("sharing: on, its words"), AllWords(Toggle.ToSharedRef()), FString(TEXT("Data sharing on")));
 		Panel->Prefs.bShareData = false;
 		TestEqual(TEXT("sharing: off again"), AllWords(Toggle.ToSharedRef()), FString(TEXT("Data sharing off")));
+	}
+	// The research agent's switch: the same, in its own words
+	const TSharedPtr<SWidget> ResearchToggle = FirstOfType(Cases[1].Card, TEXT("SCheckBox"));
+	if (TestTrue(TEXT("research agent: a switch"), ResearchToggle.IsValid()))
+	{
+		const TSharedPtr<IToolTip> Tip = ResearchToggle->GetToolTip();
+		TestTrue(TEXT("research agent: the switch's tooltip, its name"), Tip.IsValid() && AllWords(Tip->AsWidget()).Contains(TEXT("Research agent")));
+		TestEqual(TEXT("research agent: off, its words"), AllWords(ResearchToggle.ToSharedRef()), FString(TEXT("Research agent off")));
+		Panel->Prefs.ResearchChoice = true;
+		TestEqual(TEXT("research agent: on, its words"), AllWords(ResearchToggle.ToSharedRef()), FString(TEXT("Research agent on")));
+		// Never chosen: what the agent service does without a choice, off in the Aura app's (Use with Aura) and on in the
+		// user's own, also when it runs through Aura (signed in)
+		UPlaytestSettings* Settings = GetMutableDefault<UPlaytestSettings>();
+		const bool bWasAura = Settings->bUseWithAura;
+		Panel->Prefs.ResearchChoice.Reset();
+		Panel->Prefs.Access = TEXT("aura");
+		Settings->bUseWithAura = false;  // (not saved: put back below)
+		TestEqual(TEXT("research agent: the plugin's own agent service, signed in to Aura: on"), AllWords(ResearchToggle.ToSharedRef()), FString(TEXT("Research agent on")));
+		Settings->bUseWithAura = true;
+		TestEqual(TEXT("research agent: Use with Aura: off"), AllWords(ResearchToggle.ToSharedRef()), FString(TEXT("Research agent off")));
+		Panel->Prefs.ResearchChoice = true;
+		TestEqual(TEXT("research agent: the choice beats the Aura app's default"), AllWords(ResearchToggle.ToSharedRef()), FString(TEXT("Research agent on")));
+		Settings->bUseWithAura = bWasAura;
 	}
 	return true;
 }
@@ -2865,12 +2896,16 @@ bool FAutopilotResetRunsTest::RunTest(const FString& Parameters)
 	Session.SaveHistory();  // (the project's runs so far: in the project's folder)
 	const TArray<TSharedPtr<FAutopilotRun>> RunsBefore = Session.Runs;
 	const TArray<TSharedPtr<FAutopilotRun>> SetAsideBefore = Session.SetAside;
+	const TArray<TSharedPtr<FAutopilotRun>> RetiredBefore = Session.Retired;
 	const bool bLoadedBefore = Session.bHistoryLoaded;
+	const bool bLedgerBefore = Session.bLedgerLoaded;
 	const FString Dir = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("AutopilotResetRunsTest"), FGuid::NewGuid().ToString());
 	FAutopilotSession::HistoryDirOverride = Dir;
 	Session.Runs.Reset();
 	Session.SetAside.Reset();
+	Session.Retired.Reset();
 	Session.bHistoryLoaded = true;
+	Session.bLedgerLoaded = true;
 
 	auto Make = [&Session](const TCHAR* Prompt, bool bDone, double Usd)
 	{
@@ -2926,9 +2961,132 @@ bool FAutopilotResetRunsTest::RunTest(const FString& Parameters)
 	FAutopilotSession::HistoryDirOverride.Empty();
 	Session.Runs = RunsBefore;
 	Session.SetAside = SetAsideBefore;
+	Session.Retired = RetiredBefore;
 	Session.bHistoryLoaded = bLoadedBefore;
+	Session.bLedgerLoaded = bLedgerBefore;
 	++Session.UsageRevision;
 	Session.Changed();
+	return true;
+}
+
+// The usage ledger: a run whose history file goes past MaxSavedRuns keeps its usage and bill for the Settings page
+// (counted once while it is still listed this session), in the next editor session too, up to MaxUsageRuns; runs with
+// neither aren't kept. As Unity's and Godot's usage ledgers. In a folder of its own, not the project's history.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutopilotUsageLedgerTest, "AutopilotPlaytest.Editor.UsageLedger",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAutopilotUsageLedgerTest::RunTest(const FString& Parameters)
+{
+	FAutopilotSession& Session = FAutopilotSession::Get();
+	if (Session.GetActiveRun().IsValid())
+	{
+		AddWarning(TEXT("A run is going: skipped"));
+		return true;
+	}
+	Session.SaveHistory();  // (the project's runs so far: in the project's folder)
+	const TArray<TSharedPtr<FAutopilotRun>> RunsBefore = Session.Runs;
+	const TArray<TSharedPtr<FAutopilotRun>> SetAsideBefore = Session.SetAside;
+	const TArray<TSharedPtr<FAutopilotRun>> RetiredBefore = Session.Retired;
+	const bool bLoadedBefore = Session.bHistoryLoaded;
+	const bool bLedgerBefore = Session.bLedgerLoaded;
+	const FString Dir = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("AutopilotUsageLedgerTest"), FGuid::NewGuid().ToString());
+	FAutopilotSession::HistoryDirOverride = Dir;
+	Session.Runs.Reset();
+	Session.SetAside.Reset();
+	Session.Retired.Reset();
+	Session.bHistoryLoaded = true;
+	Session.bLedgerLoaded = false;  // (no ledger file in the new folder: an empty one read)
+
+	const int32 Total = FAutopilotSession::MaxSavedRuns + 5;
+	for (int32 i = 0; i < Total; ++i)
+	{
+		TSharedPtr<FAutopilotRun> Run = Session.NewRun(TEXT("explore"), FString::Printf(TEXT("Explore %d"), i));
+		Run->Started = FDateTime(2026, 1, 1) + FTimespan::FromMinutes(i);  // (each its own start)
+		Run->RunId = Run->Started.ToString(TEXT("%Y%m%d-%H%M%S"));
+		Run->bDone = true;
+		if (i % 5 != 4)  // (every fifth: no bill, never in the ledger)
+		{
+			Run->Bill.bKnown = true;
+			Run->Bill.bBilled = true;
+			Run->Bill.Usd = 0.5;
+		}
+		Session.Unsaved.Add(Run->Id);
+	}
+	// (the first 5 went past MaxSavedRuns as the later ones began: 4 of them billed)
+	TestEqual(TEXT("ledger: the billed runs past the history"), Session.Retired.Num(), 4);
+	TestTrue(TEXT("ledger: written"), IFileManager::Get().FileExists(*FAutopilotSession::UsageLedgerPath()));
+	int32 Billed = 0;
+	double Bill = Session.ProjectBill(Billed);
+	const int32 BilledAll = Total - Total / 5;
+	TestTrue(TEXT("this session: each billed run counted once"), Billed == BilledAll && FMath::IsNearlyEqual(Bill, 0.5 * BilledAll));
+	Session.SaveHistory();
+
+	// The next editor session: 50 runs listed, the 4 before them still counted
+	Session.Runs.Reset();
+	Session.Retired.Reset();
+	Session.bHistoryLoaded = false;
+	Session.bLedgerLoaded = false;
+	Session.LoadHistory();
+	TestEqual(TEXT("next session: the newest runs listed"), Session.GetRuns().Num(), FAutopilotSession::MaxSavedRuns);
+	Billed = 0;
+	Bill = Session.ProjectBill(Billed);
+	TestTrue(TEXT("next session: every billed run still counted"), Billed == BilledAll && FMath::IsNearlyEqual(Bill, 0.5 * BilledAll));
+	TestTrue(TEXT("next session: the oldest counted"), Session.GetUsageRuns().Num() > 0
+		&& Session.GetUsageRuns()[0]->Prompt == TEXT("Explore 0"));
+
+	// Up to MaxUsageRuns: the oldest go
+	Session.Retired.Reset();
+	for (int32 i = 0; i < FAutopilotSession::MaxUsageRuns + 3; ++i)
+	{
+		TSharedPtr<FAutopilotRun> Run = MakeShared<FAutopilotRun>();
+		Run->Started = FDateTime(2025, 1, 1) + FTimespan::FromMinutes(i);
+		Run->RunId = FString::Printf(TEXT("old-%d"), i);
+		Run->Bill.bKnown = true;
+		Run->Bill.Usd = 0.01;
+		Session.Retired.Add(Run);
+	}
+	TSharedPtr<FAutopilotRun> Newest = MakeShared<FAutopilotRun>();
+	Newest->Started = FDateTime(2025, 6, 1);
+	Newest->RunId = TEXT("newest");
+	Newest->Bill.bKnown = true;
+	Session.Retire(Newest);
+	TestTrue(TEXT("cap: MaxUsageRuns kept, the oldest gone"), Session.Retired.Num() == FAutopilotSession::MaxUsageRuns
+		&& Session.Retired[0]->RunId == TEXT("old-4") && Session.Retired.Last()->RunId == TEXT("newest"));
+
+	Session.Unsaved.Reset();
+	IFileManager::Get().DeleteDirectory(*FPaths::GetPath(Dir), false, true);
+	FAutopilotSession::HistoryDirOverride.Empty();
+	Session.Runs = RunsBefore;
+	Session.SetAside = SetAsideBefore;
+	Session.Retired = RetiredBefore;
+	Session.bHistoryLoaded = bLoadedBefore;
+	Session.bLedgerLoaded = bLedgerBefore;
+	++Session.UsageRevision;
+	Session.Changed();
+	return true;
+}
+
+// Blueprint Break on Exceptions held off while Autopilot plays (the game goes on past an Accessed None; the run reports
+// it), the user's setting back after; a setting already off stays off, and nothing is saved.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutopilotExceptionBreaksTest, "AutopilotPlaytest.Editor.ExceptionBreaks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAutopilotExceptionBreaksTest::RunTest(const FString& Parameters)
+{
+	UEditorExperimentalSettings* Settings = GetMutableDefault<UEditorExperimentalSettings>();
+	const bool bBefore = Settings->bBreakOnExceptions;
+	FAutopilotSession::ReleaseExceptionBreaks();  // (none held before)
+	Settings->bBreakOnExceptions = true;
+	FAutopilotSession::HoldExceptionBreaks();
+	TestFalse(TEXT("held: off while Autopilot plays"), Settings->bBreakOnExceptions);
+	FAutopilotSession::HoldExceptionBreaks();  // (a restart: held once)
+	FAutopilotSession::ReleaseExceptionBreaks();
+	TestTrue(TEXT("released: the user's setting back"), Settings->bBreakOnExceptions);
+	Settings->bBreakOnExceptions = false;
+	FAutopilotSession::HoldExceptionBreaks();
+	FAutopilotSession::ReleaseExceptionBreaks();
+	TestFalse(TEXT("off already: stays off"), Settings->bBreakOnExceptions);
+	Settings->bBreakOnExceptions = bBefore;
 	return true;
 }
 

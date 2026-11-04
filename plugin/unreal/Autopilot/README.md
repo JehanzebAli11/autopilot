@@ -280,7 +280,8 @@ While a run is going, the tab shows:
 
 Each run in the history says when it started, how long it took and its harness attempts (e.g. **Oct 19 13:25 · 03:26
 · 2 attempts**). The run history (the last 50 runs) is kept in `Saved/Autopilot/Runs/`, so closing the tab or the editor loses
-nothing. Each run's report files are written to `Saved/Playtest/<date-time>/`.
+nothing. Older runs leave the history but keep their usage and bill for the Settings page (up to 1000 runs, in
+`Saved/Autopilot/Runs/.usage/ledger.json`), as Unity's and Godot's do. Each run's report files are written to `Saved/Playtest/<date-time>/`.
 
 **Settings** (the gear beside **New run**; **Back to runs** closes it) also lists **This project**'s runs with usage or
 a bill (**Time**, **Prompt**, **Billed**; **No usage yet.** when there are none; plain rows, nothing to pick): what Autopilot was billed for each through Aura (the agent service says it when the run is
@@ -328,12 +329,13 @@ project.
 | **Design Brief** | Optional. How the game is meant to work, i.e. the rules players are told ("a crop grows after 3 waterings; the stall buys ripe crops only"). Explore reports behavior that differs from it as a bug. Sent with every run the prompt box starts, for the agent to use should the run be an exploration. |
 | **Show Policy Log** | Ask for the policy log when connecting. Takes effect at the next connect. |
 
-Two choices are machine-wide rather than per project, in `Autopilot/preferences.json` in your user settings folder
+Three choices are machine-wide rather than per project, in `Autopilot/preferences.json` in your user settings folder
 (written by the [first-run setup](#first-run-setup) and the Settings page; shared with Autopilot for Unity and Godot):
 
 | key | what it does |
 |---|---|
 | `share_data` | Share runs' data (default `true`); see [Data sharing](#data-sharing). Sent as `share` in every connection's hello. `-PlaytestShare=0` or `1` overrides it for a command-line run. |
+| `research_agent` | Runs have the research agent: while the agent works, and above all while a harness plays, a second model reads the game's code and tells the agent what it finds, for the next harness. It reaches harder goals in fewer attempts, at a higher cost. Absent until you choose on the Settings page (**Research agent**); until then runs through the Aura app (**Use with Aura**) go without it and runs on this plugin's own agent service have it, signed in to Aura or on your own keys. Sent as `research` in a connection's hello once chosen. `-PlaytestResearch=0` or `1` overrides it for a command-line run. |
 | `access` | How you chose to run the agent in the setup: `aura` or `own_keys`. The agent service reads it before every run (`aura`: runs go through Aura, on the sign-in it keeps). |
 | `onboarded` | The setup was finished or skipped. |
 
@@ -380,10 +382,18 @@ It needs a game that renders, in a window that is drawn:
 The agent uses the game's own controls, whichever input system the game uses (Enhanced Input actions, or
 the legacy action and axis mappings in Project Settings > Input). It also uses the game's UI: buttons, tabs,
 item slots, list entries, check boxes and combo boxes can be clicked, right-clicked and dragged, even when
-the game runs headless.
+the game runs headless. It can point the mouse at a place on the game's view (a spot on screen, a point in the
+world or an object) and click or drag there: the game's own mouse reads (`GetMousePosition`,
+`GetHitResultUnderCursor`, click events) see that place, and a click over the game's UI goes to that UI as the
+mouse's would. Your computer's own cursor doesn't move.
 
-Besides that, the plugin runs bug detectors inside the engine every frame, so short glitches between the
-agent's steps are caught too:
+While Autopilot plays in the editor, Blueprint Break on Exceptions (Editor Preferences > Experimental) is held off so
+an "Accessed None" doesn't stop the game mid-run (the run reports it: `log_error`); your setting is back when the
+play session ends.
+
+Besides that, while a run plays, the plugin runs bug detectors inside the engine every frame, so short glitches
+between the agent's steps are caught too. They are off in your own Play sessions, with no run going, so your game
+plays at its normal speed:
 
 | detector | fires when |
 |---|---|
@@ -428,6 +438,7 @@ UnrealEditor-Cmd.exe C:/Path/To/MyGame.uproject -game -nullrhi -unattended -nosp
 | `-PlaytestConnectTimeout=<seconds>` | how long to wait for the agent service to take the run (its welcome), default 120; `0` waits forever. When it passes, `result.json` gets the `error` and the game exits with 1 |
 | `-PlaytestStayOpen` | don't exit when the run is over |
 | `-PlaytestShare=0\|1` | whether this run's data is shared (default: `share_data` in `preferences.json`, else on); see [Data sharing](#data-sharing) |
+| `-PlaytestResearch=0\|1` | whether this run has the research agent (default: `research_agent` in `preferences.json`; not chosen: off with Use with Aura, else on) |
 | `-PlaytestSteps=N`, `-PlaytestAttempts=N` | passed on to the agent service; the current one ignores them |
 
 The report folder gets `result.json`: the run's result (verdict or goal, the reason, the evidence, the

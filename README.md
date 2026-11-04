@@ -4,68 +4,98 @@
 
 ![Aura by Ramen](./assets/aura-logo.png)
 
-Autopilot is a continually learning real-time general playtesting system. It supports Unreal Engine 5, Unity 6, Godot 4 and Roblox Studio on both Windows and MacOS.
+Autopilot is a continually learning real-time general playtesting system. Autopilot learns your game, explores your levels, and improves its gameplay run after run.
 
-Install Autopilot into your project and let it learn your game, explore your levels, and improve its gameplay run after run.
+Docs: https://www.tryaura.dev/documentation/autopilot
+
+Official Discord: https://discord.gg/tryaura
 
 ## Installation
 
-You can find the installation instructions in the [Autopilot docs](https://www.tryaura.dev/documentation/autopilot/)
+The installation (and uninstallation) instructions in this README are relevant for the Autopilot plugin and for using the Autopilot MCP through Claude Code and Codex. If you are using Autopilot through Aura, no additional setup beyond the Aura setup is necessary. If you are interested in contributing to Autopilot, follow the instructions in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### Installing pre-built packages
+### Step 1: Download
 
-1. Download the latest Autopilot build for your game engine and OS from https://www.tryaura.dev/autopilot/.
+Download the latest Autopilot build for your game engine and OS from [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/). We currently support Unreal Engine 5, Unity 6, Godot 4 and Roblox Studio on both Windows and macOS.
 
-2. Install Autopilot into your project.
+For advanced Unreal Engine users on Windows, we also support installing Autopilot from source and building it against your own Unreal Engine source build. Select the **Unreal source build** option in [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/). If you install Autopilot from source, you can skip to **Step 3: Onboarding**.
 
-   **Unreal** (v5.4-5.8)
-   1. Unzip the download. Move `Autopilot/` into your project's `Plugins/` folder (create a `Plugins/` folder yourself if your project doesn't have one yet). You should therefore have `<YourProject>/Plugins/Autopilot/Autopilot.uplugin`.
-   2. Open your project. Click the orange Autopilot icon to open Autopilot.
+### Step 2A: Adding to your project (Unreal Engine)
 
-   **Unity** (v6 or later)
-   1. Unzip the download. It should contain the file `com.ramenvr.autopilot-<version>.tgz`.
-   2. Open your project. In Window > Package Management > Package Manager, choose + > Install package from tarball..., and pick that file.
-   3. Open Window > Autopilot.
+Follow these instructions if your project is on Unreal Engine installed from the launcher.
 
-   **Godot** (v4.7 or later)
-   1. Unzip the download. Move `autopilot/` into your project's `addons/` folder.
-   2. Open your project. Enable Autopilot in Project > Project Settings > Plugins. The Autopilot dock appears on the right.
+> If you are using a custom Unreal Engine source build and have run the installation from [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/), you may skip this step and go straight to **Step 3: Onboarding**. If you don't know whether you are using a custom Unreal Engine source build, you are most likely not using one, which means that you should follow the instructions in this section to add Autopilot to your project.
 
-   **Roblox Studio**
-   1. Put `Autopilot.rbxmx` in Studio's Plugins folder (`%LOCALAPPDATA%\Roblox\Plugins` on Windows, `~/Documents/Roblox/Plugins` on macOS), or from a clone run `python tools/build_roblox.py --install`.
-   2. For a prebuilt download, install its agent service first: run `agent_service/install.ps1` on Windows or `sh agent_service/install.sh` on macOS from the unzipped folder. Then start `autopilot serve` in a terminal (a Roblox plugin cannot install or start it).
-   3. Open your place. The Autopilot dock appears on the right (Plugins > Autopilot toggles it) and connects by itself. See [plugin/roblox](plugin/roblox/README.md).
+Autopilot has builds for Unreal Engine 5.4, 5.5, 5.6, 5.7, and 5.8. If you haven't already, download them from [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/). For Windows users, you should see an `Autopilot-Unreal5.x-Win64.zip` in your downloads folder. For macOS users, you should see an `Autopilot-Unreal5.x-Mac.dmg` in your downloads folder.
 
-3. Follow the Autopilot setup flow.
-   1. We recommend using Autopilot with your Aura account. Click `Create Account` if you don't yet have an Aura account, or `Sign in` if you are a returning user.
-   2. Autopilot runs its setup, and finally redirects you to the signup/signin page. Complete your signin/signup process.
-   3. Upon successful authentication, you should see the "Agent service ready" page. Click Continue.
-   4. You have the option to enable/disable sharing your runs to improve Autopilot. As the developers of Autopilot, we would of course appreciate your enabling this!
-   5. (Optional) Run the 10-minute exploration run to populate your Autopilot project memory. It is safe to skip this and jump straight to sending your own prompt.
-   6. Prompt Autopilot! See the types of prompts you can try in [Usage](./README.md#usage).
+1. Extract/open the downloaded `Autopilot-Unreal5.x-Win64.zip` (Windows) or `Autopilot-Unreal5.x-Mac.dmg` (macOS). It contains an `Autopilot/` folder.
+2. Move `Autopilot/` into your project's `Plugins/` folder. If your project doesn't have a `Plugins/` folder, create one yourself. If you complete this step successfully, you should have `<YourProject>/Plugins/Autopilot/Autopilot.uplugin`.
+3. At this point, it is safe to delete the downloaded zip (Windows) or eject the disk image and delete the downloaded dmg (macOS).
+4. Proceed to **Step 3: Onboarding**.
 
-### Installing from source
+### Step 2B: Adding to your project (Unity)
 
-You can install Autopilot from source. This is supported for Unreal Engine only. This method allows you to build Autopilot against an Unreal source build, and places the Autopilot plugin into your Unreal project's Plugins folder automatically.
+Follow these instructions if your project is on Unity.
 
-```powershell
-git clone https://github.com/ramenvr/autopilot.git
-cd autopilot
-powershell -ExecutionPolicy Bypass -File tools\build_unreal.ps1 `
-  -EngineDir "C:\path\to\UnrealEngine" `
-  -PluginsDir "C:\path\to\YourProject\Plugins"
-```
+Autopilot has a build for Unity 6 (v6000.0 or later). If you haven't already, download it from [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/). You should see an `Autopilot-Unity.zip` in your downloads folder.
 
-Once that has completed, follow the Autopilot setup flow as shown in Step 3 of [Installing pre-built packages](./README.md#installing-pre-built-packages).
+1. Extract the downloaded `Autopilot-Unity.zip`. It contains `com.ramenvr.autopilot-<version>.tgz`.
+2. Open your project in Unity.
+3. Go to **Window > Package Management > Package Manager**.
+4. Click the **+** icon.
+5. Click **Install package from tarball...** and select `com.ramenvr.autopilot-<version>.tgz`.
+6. Proceed to **Step 3: Onboarding**.
 
-## Usage
+### Step 2C: Adding to your project (Godot)
 
-The main way to use Autopilot is through the **Autopilot plugin** in your editor. This works in Unreal Engine 5, Unity 6, Godot 4 and Roblox Studio on both Windows and MacOS. This path uses your Aura plan, or your BYOK API keys.
+Follow these instructions if your project is on Godot.
 
-Alternative ways to use Autopilot include:
+Autopilot has a build for Godot 4 (v4.7 or later). If you haven't already, download it from [tryaura.dev/autopilot](https://www.tryaura.dev/autopilot/). You should see an `Autopilot-Godot.zip` in your downloads folder.
 
-- **In Aura**: You can also use Autopilot in Aura. Only Unreal and Unity are supported through this path. This path uses your Aura plan.
-- **In Claude Code / Codex**: You can use Autopilot through Claude Code and Codex via Autopilot's skills and MCP server. To set this up, run `autopilot connect claude` and/or `autopilot connect codex` in your terminal, then prompt Claude Code / Codex to "Use Autopilot to ...". This path uses your own Claude/ChatGPT subscription.
+1. Extract the downloaded `Autopilot-Godot.zip`. It contains an `addons/autopilot/` folder.
+2. Move `autopilot/` into your project's `addons/` folder. If your project doesn't have an `addons/` folder, create one yourself, or move `addons/autopilot/` directly into your project folder. If you complete this step successfully, you should have `<YourProject>/addons/autopilot/...`.
+3. At this point, it is safe to delete the downloaded zip.
+4. Open your project in Godot.
+5. Enable Autopilot in **Project > Project Settings > Plugins**.
+6. Proceed to **Step 3: Onboarding**.
+
+### Step 2D: Adding to your place (Roblox Studio)
+
+Follow these instructions if your game is on Roblox.
+
+The Roblox build is an `Autopilot-<version>-Roblox.zip`. It contains the plugin, `Autopilot.rbxmx`, and the agent service's installer in `agent_service/`. From a clone of this repository, `python tools/build_roblox.py --install` builds the plugin and puts it in Studio's Plugins folder instead (skip to step 3 below).
+
+1. Extract the downloaded `Autopilot-<version>-Roblox.zip`.
+2. Install the agent service: run `agent_service/install.ps1` (Windows) or `sh agent_service/install.sh` (macOS) from the extracted folder. A Roblox plugin can't install or start programs, so this step is yours.
+3. Start the agent service: run `autopilot serve` in a terminal, and leave it running while you use Autopilot.
+4. Move `Autopilot.rbxmx` into Studio's Plugins folder: `%LOCALAPPDATA%\Roblox\Plugins` (Windows) or `~/Documents/Roblox/Plugins` (macOS).
+5. Open your place in Studio. The Autopilot dock appears on the right (**Plugins > Autopilot** toggles it) and connects to the agent service by itself.
+6. For screenshots and recordings of your game, turn on Studio's MCP server once: **Assistant**, **…**, **Manage MCP Servers**, **Enable Studio as MCP server**.
+7. Proceed to **Step 3: Onboarding**. More on the Roblox plugin is in [plugin/roblox](plugin/roblox/README.md).
+
+### Step 3: Onboarding
+
+The Autopilot onboarding flow installs the agent service and sets up the models (LLMs and decision models) for Autopilot to work.
+
+1. Open the Autopilot window. For Unreal and Godot users, click the Autopilot icon (orange controller). For Unity users, click **Window > Autopilot**. For Roblox Studio users, it's the Autopilot dock (**Plugins > Autopilot**).
+2. We recommend using Autopilot with your Aura account so you can track your usage in one centralized platform. Click **Create Account** if you don't yet have an Aura account, or **Sign in** if you are a returning user. You also have the option to BYOK.
+3. Wait for Autopilot to set up and start the agent service. Once it is done, you are automatically redirected to the signup/signin page.
+4. Complete the signup/signin process. If you are a new user (signup), confirm your email and then sign in to your Aura account through the Autopilot window.
+5. Upon successful authentication, you should see "Signed in as <your_email>" in the Autopilot window. Click **Continue**.
+6. You should see "Agent service ready". Click **Continue**.
+7. You have the option to enable/disable sharing your runs to improve Autopilot. As the developers of Autopilot, we would of course appreciate your enabling this! Once you are happy with your choice, click **Finish**.
+8. If you haven't used Autopilot in your project before (or have emptied your Autopilot project memory), you have the option to run a 10-minute exploration run to populate your Autopilot project memory. **Autopilot visibly improves the more it plays your game**. It is safe to skip this and jump straight to sending your own prompt.
+9. Prompt Autopilot! See the types of prompts you can try in [Things to Know](#usage).
+
+## With Coding Agents
+
+You can use Autopilot through Claude Code and/or Codex via our MCP server.
+
+1. Complete all [installation steps](#installation). Signing in with your Aura account allows this to work out of the box; Aura will only count your decision model usage, which means that your LLM usage is counted against your own Claude and/or ChatGPT subscription and not against Aura. If you want to BYOK, you need to provide a [TypeSafe API key](https://console.typesafe.ai/keys).
+2. To run the one-time setup, run `autopilot connect claude` for Claude Code or `autopilot connect codex` for Codex.
+3. Open Claude Code / Codex and prompt it to "Use Autopilot to ...".
+
+## Things to Know
 
 An Autopilot prompt is one of 4 types:
 
@@ -80,10 +110,14 @@ Your first few runs allow Autopilot to learn about your game as it gradually pop
 
 ## Uninstallation
 
-1. In Autopilot, go to Settings and click Uninstall. By default, Autopilot keeps your project's memories; you can choose to delete memories instead (this is a destructive action).
-2. Remove the plugin from each project: Unreal, close the editor and delete `Plugins/Autopilot/`; Unity, remove the Autopilot package in the Package Manager; Godot, disable Autopilot in Project > Project Settings > Plugins, then delete `addons/autopilot/`; Roblox, delete `Autopilot.rbxmx` from Studio's Plugins folder.
+To do a clean uninstall of Autopilot, do the following steps:
 
----
+1. In Autopilot, go to **Settings** and click **Uninstall**. By default, Autopilot keeps your project's memories; you can choose to delete memories instead (this is a destructive action).
+2. Remove the plugin from each project:
+   - **Unreal**: Close the editor and delete `Plugins/Autopilot/`.
+   - **Unity**: Remove the Autopilot package in the Package Manager.
+   - **Godot**: Disable Autopilot in **Project > Project Settings > Plugins**, then delete `addons/autopilot/`.
+   - **Roblox Studio**: Delete `Autopilot.rbxmx` from Studio's Plugins folder.
 
 ## Contributing
 

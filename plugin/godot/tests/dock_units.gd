@@ -1,8 +1,8 @@
 ## The dock's new pages built and driven without an editor or a game (headless, run by units.py): the first-run setup
 ## (its stepper; BYOK keys to autopilot.env; the agent service started, installed or missing, with a stand-in launcher that
 ## runs nothing; the Aura sign-in driven by aura_sign_in frames; the Aura app; Finish to preferences.json), usage and bill frames
-## kept on the run going on, the Settings page with its Account corner (account frames, the Aura bill, out of Aura credits) and Data sharing
-## box, the footer, and the settings. The link to the agent service is a stand-in that keeps what is sent (no socket). The editor bridge is the
+## kept on the run going on, the Settings page with its Account corner (account frames, the Aura bill, out of Aura credits), Data sharing
+## box and Research agent switch, the footer, and the settings. The link to the agent service is a stand-in that keeps what is sent (no socket). The editor bridge is the
 ## real one, over a stand-in debugger; the user settings folder is
 ## UNITS_DIR (a temporary folder).
 extends SceneTree
@@ -215,6 +215,26 @@ func _button_in(node: Node, text: String) -> Button:
 		if shown:
 			return c
 	return null
+
+
+## The Settings page's Research agent switch (its tooltip the plate's title), or null.
+func _research_switch() -> CheckBox:
+	for c in dock._settings_page.find_children("*", "CheckBox", true, false):
+		if c.tooltip_text == SettingsPage.RESEARCH_TITLE:
+			return c
+	return null
+
+
+## The editor's hello as it would be sent now (the stand-in link made connected for it, then as it was; the hello not
+## kept among what was sent).
+func _editor_hello() -> Dictionary:
+	var was_connected: bool = bridge.link.connected
+	bridge.link.connected = true
+	bridge._send_hello()
+	var hellos: Array = bridge.link.sent.filter(func(f): return f.get("type") == "hello")
+	bridge.link.sent = bridge.link.sent.filter(func(f): return f.get("type") != "hello")
+	bridge.link.connected = was_connected
+	return hellos[-1] if not hellos.is_empty() else {}
 
 
 ## The Settings page's Delete Autopilot's memories box (the removal asking), or null.
@@ -594,8 +614,7 @@ func run_checks() -> void:
 		and fake.sent.is_empty(), fake.sent)
 	t = _texts(dock._mem_ask)
 	check("the confirmation: Reset memory?, what it does, Reset memory (filled red) and Cancel", "Reset memory?" in t
-		and "The agent forgets what it has learned about this game." in t and "Reset memory
-Cancel" in t
+		and "The agent forgets what it has learned about this game." in t and "Reset memory\nCancel" in t
 		and _button_in(dock._mem_ask, "Reset memory").theme_type_variation == "AutopilotDangerFillSm"
 		and (dock._mem_ask.get_theme_stylebox("panel") as StyleBoxFlat).border_color == HT.RED_LINE, t)
 	check("Cancel: the Memory row again, nothing sent", _press_shown(dock._footer, "Cancel") and not dock._mem_ask.visible
@@ -990,6 +1009,70 @@ Cancel" in t
 	box.button_pressed = true
 	check("sharing box: toggled on, it says Data sharing on", box.text == "Data sharing on", box.text)
 	check("sharing box writes share_data", Prefs.load_preferences().get("share_data") == true and Prefs.load_preferences().get("access") == "own_keys")
+	# the Research agent switch: preferences.json research_agent, written only when flipped; not chosen, it shows what the
+	# agent service then does: off through the Aura app's (Use with Aura), on with this plugin's own (signed in to Aura or
+	# on the user's own keys alike)
+	var account_was: Dictionary = bridge.account
+	var with_aura_was: bool = dock._with_aura()
+	dock._set_meta("use_with_aura", false)  # (the setting itself: no reconnecting here)
+	bridge.account = {}
+	dock._render_usage()
+	t = _texts(dock._settings_page)
+	var research := _research_switch()
+	check("Research agent plate: its title in mono caps, its words", "RESEARCH AGENT" in t
+		and SettingsPage.RESEARCH == "Enabling the research agent allows Autopilot to achieve more difficult goals with fewer attempts, but at a higher cost."
+		and SettingsPage.RESEARCH in t, t)
+	check("Research agent plate: title, subtitle, then the control",
+		_setting_plate(dock._settings_page, "Research agent", SettingsPage.RESEARCH, "CheckBox"))
+	check("research switch: nothing chosen, Use with Aura off (BYOK): on; it says Research agent on, 8 px to its right, its tooltip the plate's title",
+		research != null and research.button_pressed and research.text == "Research agent on"
+		and research.theme_type_variation == "AutopilotSwitch" and research.get_theme_constant("h_separation") == HT.px(8)
+		and research.tooltip_text == "Research agent", [research.text, research.tooltip_text] if research else null)
+	Prefs.save_preferences({"access": "aura"})
+	bridge.account = {"type": "account", "mode": "aura", "email": "dev@example.org", "signed_in": true}
+	dock._render_usage()
+	check("research switch: nothing chosen, Use with Aura off, signed in to Aura (an Aura account frame, access aura): on",
+		_research_switch().button_pressed and _research_switch().text == "Research agent on", _research_switch().text)
+	bridge.account = {}
+	dock._render_usage()
+	check("research switch: nothing chosen, Use with Aura off, access aura and no account frame: on",
+		_research_switch().button_pressed and _research_switch().text == "Research agent on", _research_switch().text)
+	dock._set_meta("use_with_aura", true)
+	dock._render_usage()
+	check("research switch: nothing chosen, Use with Aura on (the Aura app's agent service): off",
+		not _research_switch().button_pressed and _research_switch().text == "Research agent off", _research_switch().text)
+	check("research switch: shown, not chosen (no research_agent in preferences.json)", not Prefs.load_preferences().has("research_agent"),
+		Prefs.load_preferences())
+	var hello := _editor_hello()
+	check("the editor's hello: no research while not chosen, share there", not hello.has("research") and hello.get("share") == true, hello)
+	_research_switch().button_pressed = true
+	var rp := Prefs.load_preferences()
+	check("research switch: flipped on with Use with Aura on, research_agent true saved, merged (sharing and access kept)",
+		typeof(rp.get("research_agent")) == TYPE_BOOL and rp.research_agent == true and rp.get("share_data") == true
+		and rp.get("access") == "aura", rp)
+	check("research switch: the choice beats Use with Aura: on", _research_switch().button_pressed
+		and _research_switch().text == "Research agent on", _research_switch().text)
+	hello = _editor_hello()
+	check("the editor's hello: research true once chosen, next to share", hello.get("research") == true and hello.get("share") == true, hello)
+	dock._set_meta("use_with_aura", false)
+	dock._render_usage()
+	research = _research_switch()
+	research.button_pressed = false
+	check("research switch: flipped off, it says Research agent off", research.text == "Research agent off", research.text)
+	rp = Prefs.load_preferences()
+	check("research switch: research_agent false saved", typeof(rp.get("research_agent")) == TYPE_BOOL and rp.research_agent == false, rp)
+	check("research switch: the choice beats this plugin's own agent service: off", not _research_switch().button_pressed
+		and _research_switch().text == "Research agent off", _research_switch().text)
+	hello = _editor_hello()
+	check("the editor's hello: research false once chosen", hello.get("research") == false and hello.has("research"), hello)
+	Prefs.save_preferences({"research_agent": "no"})
+	dock._render_usage()
+	check("research switch: research_agent not a boolean is not chosen: on with Use with Aura off", _research_switch().button_pressed)
+	check("the editor's hello: research_agent not a boolean, no research", not _editor_hello().has("research"))
+	Prefs.save_preferences({"research_agent": null, "access": "own_keys"})
+	dock._set_meta("use_with_aura", with_aura_was)
+	bridge.account = account_was
+	dock._render_usage()
 	check("Settings page: no Time limit (the composer's is every run's)", not "TIME LIMIT" in t
 		and not "Set the default time limit for runs." in t and not "\nmin\n" in t
 		and dock._settings_page.find_children("*", "SpinBox", true, false).is_empty(), t)
@@ -1201,6 +1284,8 @@ Cancel" in t
 	fixes_checks()
 	assistants_checks()
 	history_checks()
+	parity_checks()
+	await flash_checks()
 	await layout_checks()
 
 	dock.queue_free()
@@ -1360,7 +1445,8 @@ func removal_checks() -> void:
 	var t := _texts(dock._settings_page)
 	check("Settings: Remove Autopilot, last, no paragraph", "UNINSTALL AUTOPILOT" in t and not SettingsPage.REMOVE_TEXT in t
 		and not "training data" in t.to_lower() and "Uninstall" in t
-		and t.rfind("UNINSTALL AUTOPILOT") > t.rfind(SettingsPage.SHARING), t)
+		and t.rfind("UNINSTALL AUTOPILOT") > t.rfind(SettingsPage.SHARING)
+		and t.rfind("UNINSTALL AUTOPILOT") > t.rfind(SettingsPage.RESEARCH), t)
 	dock._settings_page.show_data([], true, "", {"kind": "none", "busy": true})
 	var b: Button = null
 	for c in dock._settings_page.find_children("*", "Button", true, false):
@@ -1919,7 +2005,7 @@ func assistants_checks() -> void:
 	check("the setup done: the run shown", dock._run_page.visible and dock.active != null and dock.shown == dock.active)
 	_end_run("Verify that the gate opens")
 
-	# the Settings page: Autopilot in Claude Code & Codex, after Data sharing, before Uninstall
+	# the Settings page: Autopilot in Claude Code & Codex, after Data sharing and Research agent, before Uninstall
 	_plain_view()
 	dock.settings_open = true
 	dock._render()
@@ -1932,9 +2018,18 @@ func assistants_checks() -> void:
 	check("Settings: Autopilot in Claude Code & Codex, its words", "AUTOPILOT IN CLAUDE CODE & CODEX" in t and intro in t
 		and "autopilot connect claude" in t and "autopilot connect codex" in t, t)
 	check("Settings: nothing under the commands", not "Then ask it" in t and not "Runs still use" in t, t)
-	check("Settings: after Data sharing, before Uninstall", t.find(CONSENT) >= 0
-		and t.find(CONSENT) < t.find("AUTOPILOT IN CLAUDE CODE & CODEX")
+	check("Settings: Data sharing, Research agent, then Claude Code & Codex, before Uninstall", t.find(CONSENT) >= 0
+		and t.find(CONSENT) < t.find("RESEARCH AGENT")
+		and t.find("RESEARCH AGENT") < t.find("AUTOPILOT IN CLAUDE CODE & CODEX")
 		and t.find("AUTOPILOT IN CLAUDE CODE & CODEX") < t.find("UNINSTALL AUTOPILOT"), t)
+	var titles := []
+	for p in dock._settings_page._v.get_children():
+		var caps: Array = p.find_children("*", "Label", true, false).filter(func(l): return l.theme_type_variation == "AutopilotCaps")
+		titles.append(caps[0].text if not caps.is_empty() else "")
+	var at_sharing := titles.find("SHARE RUNS TO IMPROVE AUTOPILOT")
+	check("Settings: the plates in order, Research agent right after Data sharing, then Design brief and Show Policy Log",
+		at_sharing >= 0 and titles.slice(at_sharing) == ["SHARE RUNS TO IMPROVE AUTOPILOT", "RESEARCH AGENT", "DESIGN BRIEF",
+			"SHOW POLICY LOG", "AUTOPILOT IN CLAUDE CODE & CODEX", "UNINSTALL AUTOPILOT"], titles)
 	check("Settings: no other words about it (no MCP, no Jev)", not "MCP" in t and not "Jev" in t)
 	var copies := []
 	for b in dock._settings_page.find_children("*", "Button", true, false):
@@ -3380,3 +3475,217 @@ func activity_checks() -> void:
 	check("history: the events read back", back != null and back.feed.size() == r.feed.size() and back.last_activity_id == 7
 		and back.find_activity(2).get("result") == "Got 3 lines back in 1.2 s" and int(back.find_activity(2).get("stage", -1)) == 2,
 		back.feed.size() if back != null else null)
+
+
+## A stand-in for the editor's settings (EditorSettings): the project metadata and the Editor Settings, kept in
+## dictionaries; settings_changed as the editor emits it when a setting is changed there.
+class FakeEditorSettings:
+	extends RefCounted
+	signal settings_changed
+	var meta := {}
+	var values := {}
+	var infos := {}
+	var initial := {}
+
+	func get_project_metadata(section: String, key: String, default):
+		return meta.get(section + "/" + key, default)
+
+	func set_project_metadata(section: String, key: String, value) -> void:
+		meta[section + "/" + key] = value
+
+	func has_setting(name: String) -> bool:
+		return values.has(name)
+
+	func get_setting(name: String):
+		return values.get(name)
+
+	func set_setting(name: String, value) -> void:
+		values[name] = value
+
+	func set_initial_value(name: String, value, _update_current: bool) -> void:
+		initial[name] = value
+
+	func add_property_info(info: Dictionary) -> void:
+		infos[info.name] = info
+
+
+## The parity items: the Design brief and Show Policy Log (the Settings page, the start frames, the hello's inspect,
+## the Policy log tab), the dock's settings in the Editor Settings (both ways), the ⋮ menu, and the Live page's
+## "Waiting for the game to start".
+func parity_checks() -> void:
+	var fake := FakeLink.new()
+	bridge.link = fake
+	dock.active = null
+	bridge.run_active = false
+	var es := FakeEditorSettings.new()
+	es.meta["autopilot/url"] = "ws://example.test:9/v1/bridge"
+	dock.editor_settings = es
+	dock._mirror_settings()
+	check("Editor Settings: every setting shown under autopilot/, with the project's values",
+		es.values.get("autopilot/connection/agent_service_url") == "ws://example.test:9/v1/bridge"
+		and es.values.get("autopilot/runs/default_explore_minutes") == 10 and es.values.get("autopilot/runs/design_brief") == ""
+		and es.values.get("autopilot/policy_log/show_policy_log") == true and es.values.has("autopilot/agent_service/agent_service_command")
+		and es.values.has("autopilot/runs/time_limit_minutes") and es.values.has("autopilot/connection/use_with_aura")
+		and es.infos.get("autopilot/connection/access_token", {}).get("hint") == PROPERTY_HINT_PASSWORD
+		and es.infos.get("autopilot/runs/design_brief", {}).get("hint") == PROPERTY_HINT_MULTILINE_TEXT, es.values)
+	# the Settings page's Design brief and Show Policy Log, kept in the metadata and shown in the Editor Settings
+	dock.settings_open = true
+	dock._render()
+	var page = dock._settings_page
+	check("Settings page: Design brief, laid out as every setting", _setting_plate(page, "Design brief", SettingsPage.BRIEF_TEXT, "TextEdit"))
+	check("Settings page: Show Policy Log, a switch", _setting_plate(page, "Show Policy Log", SettingsPage.POLICY_TEXT, "CheckBox")
+		and page.policy_switch.button_pressed and page.policy_switch.text == "Policy log shown")
+	page.brief_box.text = "The player has three lives; each coin is worth 10 points."
+	page.brief_box.text_changed.emit()
+	check("the brief kept as typed, and in the Editor Settings", dock.design_brief() == "The player has three lives; each coin is worth 10 points."
+		and es.values.get("autopilot/runs/design_brief") == "The player has three lives; each coin is worth 10 points.", es.meta)
+	# a change in the Editor Settings comes back to the dock
+	es.values["autopilot/runs/default_explore_minutes"] = 25
+	es.values["autopilot/agent_service/agent_service_command"] = "py -m autopilot"
+	es.settings_changed.emit()
+	check("Editor Settings changed: the dock follows (explore minutes, the command)", dock.explore_minutes() == 25
+		and dock.service_command() == "py -m autopilot" and dock._svc_cmd.text == "py -m autopilot", es.meta)
+	dock.set_service_command("")
+	dock.settings_open = false
+	# the start frames carry the brief
+	welcome(["steer"])
+	type_prompt("Verify that the coin counter goes up")
+	dock._on_run()
+	var starts: Array = fake.sent.filter(func(f): return f.get("type") == "start")
+	check("a composer run carries the brief (design_brief)", starts.size() == 1
+		and starts[0].run.get("design_brief") == "The player has three lives; each coin is worth 10 points."
+		and starts[0].run.get("kind") == "auto", starts)
+	_end_run()
+	fake.sent.clear()
+	dock.explore_from_setup(dock.explore_minutes())
+	starts = fake.sent.filter(func(f): return f.get("type") == "start")
+	check("an Explore run carries the brief (brief) and the Default Explore Minutes", starts.size() == 1
+		and starts[0].run.get("brief") == "The player has three lives; each coin is worth 10 points." and starts[0].run.get("minutes") == 25, starts)
+	# Waiting for the game to start: the Analyze stage, the game asked for and not up yet
+	var r = dock.active
+	r.stage = 1
+	r.now_text = "Reading the game's code"
+	bridge._starting = true
+	dock.shown = r
+	dock.tab = "main"
+	dock._render()
+	check("Live: Waiting for the game to start, while the game comes up in Analyze", dock._l_now.text == "Waiting for the game to start",
+		dock._l_now.text)
+	bridge._starting = false
+	dock._update_live_clock()
+	check("Live: the agent's own line once the game is up", dock._l_now.text == "Reading the game's code", dock._l_now.text)
+	r.stage = 2
+	bridge._starting = true
+	dock._render()
+	check("Live: no waiting line past Analyze", dock._l_now.text == "Reading the game's code", dock._l_now.text)
+	bridge._starting = false
+	# Show Policy Log off: no Policy log tab, the hello asks for no steps
+	r.add_step({"type": "jev", "call": 1, "t": 1.0, "decided": {"summary": "kept: walk"}})
+	dock._render()
+	check("Policy log tab shown with steps (the setting on)", dock._tab_policy.visible)
+	dock.tab = "policy"
+	dock.set_show_policy_log(false)
+	check("Show Policy Log off: no Policy log tab, its page left", not dock._tab_policy.visible and dock.tab == "main"
+		and es.values.get("autopilot/policy_log/show_policy_log") == false)
+	fake.sent.clear()
+	bridge._send_hello()
+	check("Show Policy Log off: the hello's inspect is false", fake.sent.size() == 1 and fake.sent[0].get("inspect") == false, fake.sent)
+	es.values["autopilot/policy_log/show_policy_log"] = true
+	es.settings_changed.emit()
+	fake.sent.clear()
+	bridge._send_hello()
+	check("Show Policy Log on again from the Editor Settings: inspect true", dock.show_policy_log() and fake.sent[0].get("inspect") == true)
+	_end_run()
+	# the ⋮ menu: Connect or Disconnect, Settings, Rerun setup, Reset memory…
+	var items: Array = dock.menu_items().map(func(i): return i[0])
+	check("the ⋮ menu's items", items == ["Disconnect", "Settings", "Rerun setup", "Reset memory…"], items)
+	check("the ⋮ button beside the gear, in both heads", dock._mores.size() == 2 and dock._mores.any(func(b): return b.is_visible_in_tree()))
+	dock.open_menu(dock._mores[0])
+	check("the menu opens with its items", dock._menu != null and dock._menu.item_count == 4 and dock._menu.visible)
+	dock._menu.hide()
+	dock.menu_action(1)
+	check("menu Settings opens the Settings page", dock.settings_open)
+	dock.menu_action(1)
+	check("menu Settings again closes it", not dock.settings_open)
+	dock.menu_action(3)
+	check("menu Reset memory… asks in place", dock._reset == "ask" and dock._mem_ask.visible)
+	dock._reset = ""
+	dock._render_footer()
+	dock.menu_action(0)
+	check("menu Disconnect disconnects", not fake.want and dock.menu_items()[0][0] == "Connect"
+		and dock.menu_items()[3][2] == false)
+	dock.menu_action(0)
+	check("menu Connect connects again (or starts the agent service to)", fake.want or dock._connect_when_ready,
+		[fake.want, dock._connect_when_ready, dock._auto_service()])
+	dock.editor_settings = null
+	es.meta.clear()
+	# the editor kept awake while a run goes (its sleep between frames), as it was after, however the run ends
+	OS.low_processor_usage_mode_sleep_usec = 50000
+	welcome(["steer"])
+	bridge.run_active = true
+	bridge._process(0.0)
+	check("a run going: the editor kept awake", bridge.awake and OS.low_processor_usage_mode_sleep_usec == bridge.AWAKE_SLEEP_USEC,
+		OS.low_processor_usage_mode_sleep_usec)
+	OS.low_processor_usage_mode_sleep_usec = 100000  # (the editor lost focus meanwhile: set again)
+	bridge._process(0.0)
+	check("kept awake again after the editor set its sleep", OS.low_processor_usage_mode_sleep_usec == bridge.AWAKE_SLEEP_USEC)
+	bridge._on_brain_frame({"type": "_closed", "was_connected": true})
+	bridge.link.close()
+	bridge._process(0.0)
+	check("the connection lost mid-run: the editor's sleep back as it was", not bridge.awake and OS.low_processor_usage_mode_sleep_usec == 50000,
+		OS.low_processor_usage_mode_sleep_usec)
+
+
+## Every shown control under node and its place on screen (for the flash checks).
+func _rects(node: Control) -> Dictionary:
+	var out := {}
+	for c in node.find_children("*", "Control", true, false):
+		if c.is_visible_in_tree():
+			out[c.get_instance_id()] = c.get_global_rect()
+	return out
+
+
+## Whether new content shows a frame before it is laid out (Unreal's tab needed SSettle for it): the content swapped
+## in (the Live page for a new run, the Result when the result comes, the Feed tab), its controls' places as the frame
+## was drawn (as the next frame begins) against where they are three frames later. Godot sorts a container's
+## children deferred, but within the same frame, before it is drawn: nothing moves after.
+func flash_checks() -> void:
+	var fake := FakeLink.new()
+	bridge.link = fake
+	welcome(["steer"])
+	dock.size = Vector2(900, 700)
+	dock.active = null
+	bridge.run_active = false
+	var swaps := {
+		"a new run's Live page": func() -> Control:
+			type_prompt("Verify that the gate opens when the lever is pulled")
+			dock._on_run()
+			for i in 6:
+				dock._on_activity({"type": "activity", "id": i + 1, "t": 1.0 + i, "kind": "read", "stage": "analyze", "text": "Line %d of what the agent does" % i})
+			return dock._live,
+		"the Result as it comes": func() -> Control:
+			bridge._on_brain_frame({"type": "result", "result": {"verdict": "CONFIRMED", "reason": "The gate opened at once.",
+				"evidence": ["gate_open: false → true"]}})
+			return dock._result,
+		"the Feed tab": func() -> Control:
+			dock._set_tab("feed")
+			return dock._feed_area,
+	}
+	for name in swaps:
+		await process_frame
+		var page: Control = swaps[name].call()
+		# (the next frame begins once this one is drawn: its controls' places then are those it was drawn with; headless,
+		# RenderingServer.frame_pre_draw is never emitted)
+		await process_frame
+		var drawn := _rects(page)
+		for i in 3:
+			await process_frame
+		var later := _rects(page)
+		var moved := []
+		for id in later:
+			if not drawn.has(id) or drawn[id] != later[id]:
+				var c = instance_from_id(id)
+				moved.append("%s %s -> %s" % [c.get_class() if c else "?", drawn.get(id), later[id]])
+		check("no flash: %s laid out before it is drawn (%d controls)" % [name, later.size()], later.size() > 5 and moved.is_empty(),
+			moved.slice(0, 6))
+	dock._set_tab("main")
