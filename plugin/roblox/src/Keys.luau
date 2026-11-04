@@ -428,11 +428,22 @@ end
 function Keys.pointAt(at: Vector2): (boolean, string?)
 	Keys.endTurn()
 	Keys.pointer = at
-	local ok, err = pcall(function()
-		vi():SendMousePosition(Keys.toVirtual(at))
-	end)
-	if not ok then
-		return false, Keys.why(err)
+	-- (sent again each frame until the mouse is there, a few frames at most: while the camera still holds the mouse
+	-- after a turn, a few frames after its button went up, a move is dropped; a touch device's mouse doesn't follow)
+	for _ = 1, 15 do
+		local ok, err = pcall(function()
+			vi():SendMousePosition(Keys.toVirtual(at))
+		end)
+		if not ok then
+			return false, Keys.why(err)
+		end
+		if UserInputService.TouchEnabled then
+			break
+		end
+		RunService.Heartbeat:Wait()
+		if (UserInputService:GetMouseLocation() - at).Magnitude < 2 then
+			break
+		end
 	end
 	return true, nil
 end
