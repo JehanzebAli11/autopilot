@@ -1,0 +1,86 @@
+{
+  "name": "Prism Gauntlet",
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$properties": {
+        "Gravity": 196.2
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future",
+        "ClockTime": 18.7,
+        "Brightness": 2.2,
+        "Ambient": [0.62, 0.56, 0.78],
+        "OutdoorAmbient": [0.56, 0.48, 0.74],
+        "EnvironmentDiffuseScale": 0.8,
+        "EnvironmentSpecularScale": 1,
+        "GlobalShadows": true,
+        "ShadowSoftness": 0.25
+      },
+      "Atmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.34,
+          "Offset": 0.2,
+          "Color": [0.62, 0.45, 0.86],
+          "Decay": [0.32, 0.18, 0.5],
+          "Glare": 0.5,
+          "Haze": 1.8
+        }
+      },
+      "Bloom": {
+        "$className": "BloomEffect",
+        "$properties": {
+          "Intensity": 0.9,
+          "Size": 28,
+          "Threshold": 0.92
+        }
+      },
+      "Grade": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": {
+          "Contrast": 0.12,
+          "Saturation": 0.18,
+          "TintColor": [1, 0.97, 1]
+        }
+      },
+      "SunRays": {
+        "$className": "SunRaysEffect",
+        "$properties": {
+          "Intensity": 0.06,
+          "Spread": 0.8
+        }
+      }
+    },
+    "ReplicatedStorage": {
+      "$path": "src/shared",
+      "Remotes": {
+        "$className": "Folder",
+        "StageReached": {
+          "$className": "RemoteEvent"
+        },
+        "Died": {
+          "$className": "RemoteEvent"
+        },
+        "Finished": {
+          "$className": "RemoteEvent"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "$path": "src/server"
+    },
+    "StarterPlayer": {
+      "$properties": {
+        "CharacterWalkSpeed": 16,
+        "CharacterUseJumpPower": false,
+        "CharacterJumpHeight": 7.2
+      },
+      "StarterPlayerScripts": {
+        "$path": "src/client"
+      }
+    }
+  }
+}
