@@ -1,6 +1,6 @@
 """The brain's kit (autopilot.kit through autopilot.engines.roblox) on the test game in Roblox Studio: Game reads, the
 kit frame, movement(), calibrate_look, look_at, sees, walk_to (lanterns collected), jump_to (the crate), go_and_press
-(the lever's ProximityPrompt), the UI, restart. Studio needn't be in front (see harness.py).
+(the lever's ProximityPrompt), walk_to up a ramp to a raised goal (the view's ways_up), the UI, restart. Studio needn't be in front (see harness.py).
 
     python plugin/roblox/tests/kit_live.py
 """
@@ -98,6 +98,20 @@ def run(game):
     time.sleep(0.5)
     check("go_and_press the lever (ProximityPrompt, E)", game.get("/Workspace/Grove/Gate", "Open") is True,
           f"{r and r.why}")
+    # walk_to a goal higher than a jump: up the ramp the view's ways_up tells (the Lookout, 9 studs, its ramp's foot at
+    # Roblox x -34; the player put 10 studs east of it, off the grove's things)
+    game.request("rc", {"verb": "property", "body": {"objectPath": "Character", "propertyName": "position",
+                                                     "propertyValue": {"position": {"x": -24, "y": 3, "z": 0}},
+                                                     "access": "WRITE_ACCESS"}})
+    time.sleep(1.0)
+    drive(control.look_at(game, "/Workspace/Grove/Lookout", tolerance=10.0), timeout=6)
+    ways = control._ways_up_seen(game)
+    check("view ways_up: the ramp up to the lookout", ways is not None and any(
+        abs(top.z - 9 * STUD) < 40 and foot.dist2d(Vec(0, -34 * STUD, 0)) < 150 for foot, top in ways), str(ways))
+    r = drive(control.walk_to(game, "/Workspace/Grove/Beacon", within=120, timeout=30), timeout=35)
+    feet = game.pose()["at"].z - control.movement(game)["half_height"]
+    check("walk_to the beacon on the lookout: up its ramp (ways_up)", r and feet > 8 * STUD,
+          f"{r and r.why} feet={feet:.0f} at={game.pose()['at']}")
     ui = {e["id"]: e for e in game.ui()}
     check("game.ui()", "Menu.RingButton" in ui, str(sorted(ui)))
     game.ui_act(id="Menu.RingButton", action="click")

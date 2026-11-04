@@ -11,6 +11,7 @@ import time
 
 from harness import BridgeError, brain, check, expect, summary, until
 
+STUD = 28.0  # kit units (cm) in a stud
 
 def main():
     link = brain()
@@ -232,6 +233,44 @@ def main():
     expect("context: input and device", lambda: req("context"), lambda r: r["input"]["needs_focus"] is False
            and r["device"]["touch"] is False and "pad" in r["input"])
 
+    # view: what it tells beyond the things (nothing omitted), the ways up, a tipped thing's top, what is held, what
+    # the body is against
+    v = expect("view: nothing omitted, the sun, nothing held", lambda: req("view", {"max_count": 30}),
+               lambda r: r["omitted"] == [] and isinstance(r["scene"]["sun"], (int, float)) and r["held"] == [])
+    _put(req, (-24, 3, 0))  # (on the ground east of the Lookout's ramp, whose foot is at x -34)
+    check("turned to face the lookout", _face(req, "/Workspace/Grove/Lookout"))
+    v = expect("view ways_up: the ramp up to the lookout (foot at x -34, top 9 studs up)", lambda: req("view", {
+        "max_count": 30, "ways_up": True, "openings": True}), lambda r: any(
+        abs(w["top"]["Z"] - 9 * STUD) < 40 and abs(w["foot"]["Y"] + 34 * STUD) < 150 and abs(w["foot"]["X"]) < 150
+        and abs(w["foot"]["Z"]) < 20 for w in r["body"]["ways_up"]))
+    if v:
+        print(f"  ways_up: {v['body']['ways_up']}")
+        check("view openings: openings and free asked, told", isinstance(v["body"].get("openings"), list)
+              and len(v["body"].get("free") or []) > 0, str({k: v["body"].get(k) for k in ("openings", "free")}))
+        ramp = next((t for t in v["visible"] if t["name"] == "Ramp"), None)
+        check("view: the ramp is tipped (tilt, its own box) about 27 degrees", ramp is not None
+              and abs(abs(ramp.get("tilt", {}).get("roll", 0)) - 27) <= 2 and "box" in ramp, str(ramp))
+        check("view: the ramp's top slopes 27 degrees, uphill to the west (kit yaw -90)", ramp is not None
+              and abs(ramp.get("top_slope_degrees", 0) - 27) <= 3 and abs(ramp.get("uphill", {}).get("yaw", 0) + 90) <= 5,
+              str(ramp))
+    req("key", {"key": "One", "mode": "press"})  # (the hotbar's first tool: the Torch)
+    held = until(lambda: req("view", {"max_count": 30})["held"], 3)
+    check("view held: the Torch equipped, in a hand", bool(held) and held[0]["name"] == "Torch"
+          and "Hand" in held[0].get("attached_at", "") and held[0]["look"]["parts"] == ["Handle"], str(held))
+    check("view: what is held isn't among the things seen", not any(t["name"] == "Torch" for t in req("view", {
+        "max_count": 30})["visible"]))
+    req("key", {"key": "One", "mode": "press"})  # (put away)
+    _put(req, (-58, 3, 9))  # (beside the Lookout's south wall, z 6)
+    req("move", {"direction": {"X": 1, "Y": 0, "Z": 0}, "seconds": 0.8})  # (kit +X is Roblox -z: into the wall)
+    _face(req, "/Workspace/Grove/Lookout")
+    req("key", {"key": "W", "mode": "hold", "lease": 0.4})
+    v = req("view", {"max_count": 30})
+    req("key", {"key": "W", "mode": "release"})
+    lookout = next((t for t in v["visible"] if t["name"] == "Lookout"), None)
+    check("view: the body against the lookout (touching, blocks_player)", any(t["thing"] == "Lookout" for t in
+          v["body"].get("touching", [])) and lookout is not None and lookout.get("blocks_player") is True,
+          str((v["body"].get("touching"), lookout)))
+
     # pictures
     if media:
         shot = expect("capture: the game's picture", lambda: req("capture", {"max_dim": 640}, timeout=30),
@@ -349,6 +388,13 @@ def _face(req, path, tries=6):
         req("key", {"key": "MouseX", "mode": "press", "value": round(bearing / 0.5, 1)})
         time.sleep(0.6)
     return False
+
+
+def _put(req, at):
+    """Put the player at a spot (Roblox's x, y, z): a test's setup, a direct change."""
+    req("rc", {"verb": "property", "body": {"objectPath": "Character", "propertyName": "position", "propertyValue": {
+        "position": {"x": at[0], "y": at[1], "z": at[2]}}, "access": "WRITE_ACCESS"}})
+    time.sleep(1.0)
 
 
 def _go_to(req, path):

@@ -341,3 +341,53 @@ def test_the_detectors_work_only_while_a_run_uses_the_game():
     assert "if not self.active then" in detectors and "if not self.active or not self.enabled" in detectors
     editor = sources["Editor"]
     assert editor.count("run_active = self.runActive") == 2 and 'type = "run", active = self.runActive' in editor
+
+
+def test_the_view_tells_what_the_other_engines_do():
+    """view as Godot's and Unreal's: nothing omitted; held (a Tool, what is welded on, the camera's viewmodel) left out
+    of the things and the rays; the room round the body (openings, free, ways_up with lane and inside) and top surfaces
+    found by the body's own probes (Reach.luau: a Humanoid's step and slope, its CollisionGroup, Blockcasts); tilt, own
+    box, blocks_player, crosshair_part, body_center, overhead/under, scene.sun, look's effects/highlighted/limp."""
+    sources = _sources()
+    sight, reach, world = sources["Sight"], sources["Reach"], sources["World"]
+    assert "Sight.OMITTED = {}" in sight and "require(script.Parent.Reach)" in sight
+    for arg in ("args.ways_up == true", "args.openings == true", "args.openings_reach", "args.floor_size",
+                "args.overhead_reach"):
+        assert arg in sight, arg
+    for key in ("result.held = heldJson(held, cam)", "result.scene = { sun =", "item.blocks_player = true",
+                "item.crosshair_part = crosshairPart", "item.tilt = {", "item.box = {", "item.body_center",
+                "item.body_shown", "body.overhead = told", "body.under = {", "look.highlighted = true",
+                "look.limp = true", "{ asset = e, scale = effects[e] }", "attached_at", "in_view"):
+        assert key in sight, key
+    # held: an equipped Tool, welded things outside the character, the camera's children; out of every ray
+    assert 'c:IsA("Tool")' in sight and "GetConnectedParts(true)" in sight and "cam:GetChildren()" in sight
+    assert "for _, h in ipairs(held or Sight.heldThings()) do" in sight and "heldSet[thing]" in sight
+    assert "p.CollisionGroup = root.CollisionGroup" in sight
+    # the body's own probes: a Humanoid's step (0.9 x HipHeight), slopes to at most 60 degrees, Blockcast sweeps
+    assert "math.max(hipHeight, 0.5) * 0.9 * S" in reach and "math.clamp(maxSlope, 0, 60)" in reach
+    assert "workspace:Blockcast(" in reach and "workspace:Raycast(o, d, self.params)" in reach
+    for out in ("body.ways_up = waysUp(", "body.openings = listed", "body.free = free", "o.lane = {", "o.inside",
+                'o.seen_from = "side"', "item.top_slope_degrees", "item.low_end", "item.high_end", "item.lane = lane",
+                "item.uphill = {"):
+        assert out in reach, out
+    assert 'inst:IsA("Terrain")' in sight  # (the terrain: a floor and a wall, never a thing named)
+    # a thing's own box, as it is turned
+    assert "function World.box(inst: Instance): (Vector3?, Vector3?, CFrame?, Vector3?)" in world
+    assert "return c, s, inst.CFrame, inst.Size" in world
+
+
+def test_watch_tells_effects_stopped_and_went_limp():
+    sight = _sources()["Sight"]
+    assert '{ "effects", "effect", "stopped" }' in sight and '{ "sounds", "sound", "ended" }' in sight
+    assert '"went limp"' in sight
+
+
+def test_the_test_game_has_a_way_up_and_a_tool():
+    game = open(os.path.join(ROOT, "plugin", "roblox", "tests", "testgame.luau"), encoding="utf-8").read()
+    for name in ('Name = "Lookout"', 'Name = "Ramp"', 'Name = "Beacon"', 'torch.Name = "Torch"',
+                 "torch.Parent = StarterPack"):
+        assert name in game, name
+    tests = os.path.join(ROOT, "plugin", "roblox", "tests")
+    assert '"ways_up": True' in open(os.path.join(tests, "smoke.py"), encoding="utf-8").read()
+    assert "/Workspace/Grove/Beacon" in open(os.path.join(tests, "kit_live.py"), encoding="utf-8").read()
+    assert 'attached_at") == "HumanoidRootPart"' in open(os.path.join(tests, "multiplayer.py"), encoding="utf-8").read()

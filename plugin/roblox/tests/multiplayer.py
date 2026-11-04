@@ -49,6 +49,11 @@ def main():
     req("key", {"key": "E", "mode": "press"})
     expect("player 1 picks the basket up (E)", lambda: until(lambda: basket("Carrier") == ctx["players"][0]["name"], 3),
            lambda r: r)
+    # what player 1 holds: the basket, welded to its root part (and no longer a thing it sees)
+    v = until(lambda: (x := game.view(max_count=30)) and x.get("held") and x, 3) or {}
+    check("player 1's view holds the basket (welded on)", [h["name"] for h in v.get("held", [])] == ["Basket"]
+          and v["held"][0].get("attached_at") == "HumanoidRootPart"
+          and not any(t["name"] == "Basket" for t in v.get("visible", [])), str(v.get("held")))
     # the cart refuses it from the one who picked it up
     _place(req, 1, (-20, 3, 23))
     time.sleep(0.5)
@@ -63,6 +68,8 @@ def main():
     expect("player 1 hands the basket to player 2 (G)", lambda: until(lambda: basket("Carrier") == name2, 3),
            lambda r: r)
     check("... handed over", basket("HandedOver") is True)
+    v2 = until(lambda: (x := two.view(max_count=30)) and x.get("held") and x, 3) or {}
+    check("... player 2's view holds it now", [h["name"] for h in v2.get("held", [])] == ["Basket"], str(v2.get("held")))
     expect("player 1's HUD says player 2 carries it", lambda: until(
         lambda: game.screen().get("HUD.BasketLabel") == f"Basket: {name2} carries it", 3), lambda r: r)
     s2 = two.screen()
