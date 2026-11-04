@@ -1,5 +1,6 @@
 --!strict
--- The screen's texts (`screen`), its interactive controls (`ui`, `ui_act`) and the mouse's spot (`pointer`).
+-- The screen's texts (`screen`), its interactive controls (`ui`, `ui_act`), the mouse's spot (`pointer`) and a finger on
+-- the screen (`touch`).
 --
 -- Keys and ids are "<ScreenGui>.<Name>" (the ScreenGui the element is in, under the player's PlayerGui), repeated keys
 -- getting "#2", "#3". An element counts when it and every GuiObject above it are Visible, its ScreenGui is Enabled, it
@@ -8,6 +9,8 @@
 -- whether the button's Activated came ("fired").
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local Frame = require(script.Parent.Frame)
 local Json = require(script.Parent.Json)
@@ -217,14 +220,20 @@ local function find(id: string): GuiObject?
 	return if g and g.Parent then g else nil
 end
 
-local function click(at: Vector2, button: Enum.UserInputType, count: number?)
-	local vi = Keys.virtual()
-	Keys.pointAt(at)
+local function click(at: Vector2, button: Enum.UserInputType, count: number?): (boolean, string?)
+	local ok, why = Keys.pointAt(at)
+	if not ok then
+		return false, why
+	end
 	task.wait() -- (the cursor there first, as a player's mouse arrives before it clicks)
 	for i = 1, count or 1 do
-		vi:SendMouseButton(at, button, true, i)
-		vi:SendMouseButton(at, button, false, i)
+		ok, why = Keys.button(at, button, true, i)
+		if not ok then
+			return false, why
+		end
+		Keys.button(at, button, false, i)
 	end
+	return true, nil
 end
 
 -- [ok, result or error]; a click's answer comes a few frames later (yields).
@@ -255,7 +264,13 @@ function Ui.act(args: any): (boolean, any)
 			end))
 		end
 		local button = if action == "right_click" then Enum.UserInputType.MouseButton2 else Enum.UserInputType.MouseButton1
-		click(Ui.middle(el), button, if action == "double_click" then 2 else 1)
+		local ok, why = click(Ui.middle(el), button, if action == "double_click" then 2 else 1)
+		if not ok then
+			for _, c in ipairs(conns) do
+				c:Disconnect()
+			end
+			return false, why
+		end
 		for _ = 1, 6 do
 			if fired then
 				break
@@ -265,7 +280,8 @@ function Ui.act(args: any): (boolean, any)
 		for _, c in ipairs(conns) do
 			c:Disconnect()
 		end
-		local out: any = { via = "mouse", fired = fired }
+		local out: any = { via = if UserInputService.TouchEnabled and button == Enum.UserInputType.MouseButton1
+			then "touch" else "mouse", fired = fired }
 		if not fired then
 			out.note = "the element didn't take the click (something on top of it, or it isn't Active)"
 		end
@@ -275,10 +291,20 @@ function Ui.act(args: any): (boolean, any)
 			local box = el :: TextBox
 			local text = tostring(args.text or args.value or "")
 			click(Ui.middle(box), Enum.UserInputType.MouseButton1)
-			task.wait()
-			pcall(function()
-				box:CaptureFocus()
-			end)
+			-- (the click focuses the box a frame or two later, clearing it when ClearTextOnFocus: the text goes in
+			-- once it has focus, never before, or the focus would come after and take it away)
+			for _ = 1, 10 do
+				if box:IsFocused() then
+					break
+				end
+				task.wait()
+			end
+			if not box:IsFocused() then
+				pcall(function()
+					box:CaptureFocus()
+				end)
+				task.wait()
+			end
 			box.Text = text
 			task.wait()
 			-- (submitted, as Enter would: FocusLost(enterPressed = true))
@@ -293,28 +319,31 @@ function Ui.act(args: any): (boolean, any)
 		if to == nil then
 			return false, "no element " .. tostring(args.to) .. " on screen to drop on"
 		end
-		local vi = Keys.virtual()
 		local a, b = Ui.middle(el), Ui.middle(to :: GuiObject)
 		Keys.pointAt(a)
-		vi:SendMouseButton(a, Enum.UserInputType.MouseButton1, true, 1)
+		local ok, why = Keys.button(a, Enum.UserInputType.MouseButton1, true)
+		if not ok then
+			return false, why
+		end
 		for i = 1, 4 do
 			task.wait()
 			Keys.pointAt(a:Lerp(b, i / 4))
 		end
 		task.wait()
-		vi:SendMouseButton(b, Enum.UserInputType.MouseButton1, false, 1)
+		Keys.button(b, Enum.UserInputType.MouseButton1, false)
 		return true, Json.object()
 	end
 	return false, "unknown action " .. action
 end
 
--- `pointer`: put the mouse at {"screen_x", "screen_y"} (-1..1 from the middle, y up), {"world": kit point} or
--- {"object": path} (where the camera shows it), without moving across. -> {"screen_x", "screen_y", "x", "y",
--- "on_screen"}
-function Ui.pointer(args: any): (boolean, any)
+-- A spot on the screen, from {"screen_x", "screen_y"} (-1..1 from the middle, y up), {"x", "y"} (viewport pixels, the
+-- top bar's inset included, as `ui` gives an element's `screen`), {"world": kit point}, {"object": path} (where the
+-- camera shows it; a GUI element's middle) or {"ui": an id from `ui`}: (the viewport point, whether it is in view) or
+-- (nil, why).
+function Ui.spot(args: any): (Vector2?, any)
 	local cam = workspace.CurrentCamera
 	if cam == nil then
-		return false, "No camera"
+		return nil, "No camera"
 	end
 	local vp = cam.ViewportSize
 	local at: Vector2
@@ -322,29 +351,35 @@ function Ui.pointer(args: any): (boolean, any)
 	if args.screen_x ~= nil or args.screen_y ~= nil then
 		local sx, sy = tonumber(args.screen_x) or 0, tonumber(args.screen_y) or 0
 		at = Vector2.new((sx + 1) / 2 * vp.X, (1 - sy) / 2 * vp.Y)
+	elseif tonumber(args.x) and tonumber(args.y) then
+		at = Vector2.new(tonumber(args.x) :: number, tonumber(args.y) :: number)
+	elseif args.ui ~= nil then
+		local g = find(tostring(args.ui))
+		if g == nil then
+			return nil, "no element " .. tostring(args.ui) .. " on screen"
+		end
+		at = Ui.middle(g :: GuiObject)
 	else
 		local p: Vector3? = nil
-		if args.world then
+		if type(args.world) == "table" then
 			p = Frame.fromKit(args.world)
 		elseif args.object then
 			local inst = Paths.resolve(tostring(args.object))
 			if inst == nil then
-				return false, "Object " .. tostring(args.object) .. " does not exist"
+				return nil, "Object " .. tostring(args.object) .. " does not exist"
 			end
 			if inst:IsA("GuiObject") then
-				local m = Ui.middle(inst :: GuiObject)
-				p = nil
-				at = m
+				at = Ui.middle(inst :: GuiObject)
 			else
 				local cf = if inst:IsA("BasePart") then (inst :: BasePart).CFrame
 					elseif inst:IsA("PVInstance") then (inst :: PVInstance):GetPivot() else nil
 				if cf == nil then
-					return false, tostring(args.object) .. " has no place in the world"
+					return nil, tostring(args.object) .. " has no place in the world"
 				end
 				p = cf.Position
 			end
 		else
-			return false, "pointer wants screen_x/screen_y, world or object"
+			return nil, "a spot wants screen_x/screen_y, x/y, world, object or ui"
 		end
 		if p then
 			local sp, on = cam:WorldToViewportPoint(p)
@@ -352,10 +387,156 @@ function Ui.pointer(args: any): (boolean, any)
 			at = Vector2.new(sp.X, sp.Y)
 		end
 	end
-	at = Vector2.new(math.clamp(at.X, 0, vp.X - 1), math.clamp(at.Y, 0, vp.Y - 1))
-	Keys.pointAt(at)
-	return true, { x = math.round(at.X), y = math.round(at.Y), screen_x = Frame.r2(at.X / vp.X * 2 - 1),
-		screen_y = Frame.r2(1 - at.Y / vp.Y * 2), on_screen = visible }
+	return Vector2.new(math.clamp(at.X, 0, vp.X - 1), math.clamp(at.Y, 0, vp.Y - 1)), visible
+end
+
+local function where(at: Vector2): any
+	local cam = workspace.CurrentCamera
+	local vp = if cam then cam.ViewportSize else Vector2.one
+	return { x = math.round(at.X), y = math.round(at.Y), screen_x = Frame.r2(at.X / vp.X * 2 - 1),
+		screen_y = Frame.r2(1 - at.Y / vp.Y * 2) }
+end
+
+-- `pointer`: put the mouse at a spot (Ui.spot), without moving it across. -> {"screen_x", "screen_y", "x", "y",
+-- "on_screen"}
+function Ui.pointer(args: any): (boolean, any)
+	local at, visible = Ui.spot(args)
+	if at == nil then
+		return false, visible
+	end
+	local ok, why = Keys.pointAt(at)
+	if not ok then
+		return false, why
+	end
+	local out = where(at)
+	out.on_screen = visible
+	return true, out
+end
+
+-- `touch`: a finger on the screen. {"action": "tap" (the default) | "double_tap" | "long_press" | "swipe" | "down" |
+-- "move" | "up", a spot (Ui.spot), "to": another spot (a swipe's end), "seconds" (a long press's hold, a swipe's
+-- length)}. While Studio simulates a touch device (`device`: a phone or tablet; UserInputService.TouchEnabled) Studio
+-- makes the virtual mouse's left button the finger: the game gets real touches (TouchStarted, TouchTap, TouchMoved,
+-- TouchLongPress, TouchSwipe, a Touch InputObject; the on-screen thumbstick and jump button take them). Otherwise the
+-- finger is the mouse's left button, and the answer's `as` says "mouse". "down" leaves the finger down (until "up", or
+-- `seconds`, else 10 s) and "move" drags it. -> {"as", "x", "y", "screen_x", "screen_y"}
+local finger: { down: boolean, at: Vector2, token: number } = { down = false, at = Vector2.zero, token = 0 }
+local LEFT = Enum.UserInputType.MouseButton1
+
+local function fingerDown(at: Vector2): (boolean, string?)
+	local ok, why = Keys.pointAt(at)
+	if not ok then
+		return false, why
+	end
+	ok, why = Keys.button(at, LEFT, true)
+	if not ok then
+		return false, why
+	end
+	finger.down, finger.at = true, at
+	finger.token += 1
+	return true, nil
+end
+
+local function fingerUp()
+	if finger.down then
+		finger.down = false
+		Keys.button(finger.at, LEFT, false)
+	end
+end
+
+local function fingerTo(to: Vector2, seconds: number)
+	local from = finger.at
+	local started = os.clock()
+	repeat
+		RunService.Heartbeat:Wait()
+		local k = if seconds > 0 then math.min(1, (os.clock() - started) / seconds) else 1
+		local at = from:Lerp(to, k)
+		Keys.pointAt(at)
+		finger.at = at
+	until k >= 1
+end
+
+function Ui.touch(args: any): (boolean, any)
+	local action = tostring(args.action or "tap")
+	local seconds = tonumber(args.seconds)
+	if action == "up" then
+		fingerUp()
+		return true, { as = if UserInputService.TouchEnabled then "touch" else "mouse" }
+	end
+	local at: Vector2? = finger.at
+	if action ~= "move" or args.screen_x ~= nil or args.screen_y ~= nil or args.x ~= nil or args.y ~= nil
+		or args.world ~= nil or args.object ~= nil or args.ui ~= nil then
+		local spot, why = Ui.spot(args)
+		if spot == nil then
+			return false, why
+		end
+		at = spot
+	end
+	local p = at :: Vector2
+	if action == "tap" or action == "double_tap" then
+		for i = 1, if action == "double_tap" then 2 else 1 do
+			local ok, why = fingerDown(p)
+			if not ok then
+				return false, why
+			end
+			for _ = 1, 3 do
+				RunService.Heartbeat:Wait()
+			end
+			fingerUp()
+			if i == 1 and action == "double_tap" then
+				task.wait(0.08)
+			end
+		end
+	elseif action == "long_press" then
+		local ok, why = fingerDown(p)
+		if not ok then
+			return false, why
+		end
+		task.wait(seconds or 0.8)
+		fingerUp()
+	elseif action == "swipe" then
+		local to, why = Ui.spot(args.to or {})
+		if to == nil then
+			return false, "a swipe wants `to`: " .. tostring(why)
+		end
+		local ok, why2 = fingerDown(p)
+		if not ok then
+			return false, why2
+		end
+		fingerTo(to :: Vector2, seconds or 0.25)
+		RunService.Heartbeat:Wait()
+		fingerUp()
+		p = to :: Vector2
+	elseif action == "down" then
+		local ok, why = fingerDown(p)
+		if not ok then
+			return false, why
+		end
+		local token = finger.token
+		task.delay(seconds or 10, function()
+			if finger.down and finger.token == token then
+				fingerUp()
+			end
+		end)
+	elseif action == "move" then
+		if not finger.down then
+			return false, "no finger is down (touch down first)"
+		end
+		fingerTo(p, seconds or 0)
+	else
+		return false, "unknown touch action " .. action
+	end
+	local out = where(p)
+	out.as = if UserInputService.TouchEnabled then "touch" else "mouse"
+	if out.as == "mouse" then
+		out.note = "Studio isn't simulating a touch device, so the finger went in as the mouse's left button: set a "
+			.. "phone or tablet (the `device` request) for touches"
+	end
+	return true, out
+end
+
+function Ui.releaseTouch()
+	fingerUp()
 end
 
 return Ui

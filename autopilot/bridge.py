@@ -40,7 +40,7 @@ REPEAT_SECONDS = 180
 # go and the Aura sign-in the plugin may ask for (`account`, `aura_sign_in` frames: autopilot/account.py); "setup", the
 # first-run setup's choices saved for a plugin that can't write Autopilot/'s files itself (`save_setup`: Roblox's)
 BRAIN_FEATURES = ["steer", "usage", "account", "setup"]
-DEFERRED_OPS = ("move", "watch")
+DEFERRED_OPS = ("move", "watch", "touch")  # (touch: a long press or swipe takes its `seconds`)
 # Ops the brain can't play without, each with arguments that make it answer without changing anything (see
 # Link.missing_ops). A plugin lacking one answers "unknown op": without this check the brain would go on blind
 # (no `view`) or with its keys doing nothing (no `key`), and only its verdicts would show it.
@@ -131,6 +131,11 @@ class Link:
         # Bearer" token and its "X-Autopilot-Mode" (None when it sent none)
         self.auth_token = None
         self.mode = None
+        # Requests answered here instead of by the plugin ({op: fn(args) -> result}): a Roblox plugin's pictures, which
+        # Studio gives the agent service but not the plugin (autopilot/studio_mcp.py)
+        self.local_ops = {}
+        self.media = None  # (what answers those: a studio_mcp.RobloxMedia, closed with the link)
+        self.session_running = None  # whether a game runs, by the plugin's last `session` event (None: none yet)
 
     # -- sending ------------------------------------------------------------------------------------
 
@@ -207,6 +212,13 @@ class Link:
         None when it doesn't): (result, game time). A look at what the player sees is of that moment, however long
         the answer then took to come back."""
         args = args or {}
+        local = self.local_ops.get(op)
+        if local is not None:
+            if self.closed:
+                raise requests.ConnectionError(f"the game is disconnected ({self.closed})")
+            result = local(args)
+            t = result.get("t") if isinstance(result, dict) else None
+            return result, t if isinstance(t, (int, float)) and not isinstance(t, bool) else None
         rid = next(self._ids)
         done = threading.Event()
         entry = [done, None, time.monotonic(), op]
@@ -227,7 +239,10 @@ class Link:
         if not frame.get("ok"):
             raise BridgeError(frame.get("status", 400), frame.get("error", "error"))
         t = frame.get("t")
-        return frame.get("result"), t if isinstance(t, (int, float)) and not isinstance(t, bool) else None
+        result = frame.get("result")
+        if op == "capture" and isinstance(result, dict) and result.get("png"):
+            result = _jpeg_picture(result, args)
+        return result, t if isinstance(t, (int, float)) and not isinstance(t, bool) else None
 
     def post(self, op, args=None):
         """Send a request without waiting for its answer (an error answer is kept in async_errors)."""
@@ -271,12 +286,15 @@ class Link:
             for event in frame.get("events", []):
                 self._event(event)
         elif kind == "hello":
-            self.hello = frame
-            self.last_heartbeat = time.time()
+            self.adopt_hello(frame)
             self.messages.put(frame)
         elif kind == "inspect":
             pass  # the Autopilot tab asks for Jev's calls: Autopilot sends them on its own (autopilot/runtime.py)
         elif kind == "frame":
+            if frame.get("png") and not frame.get("jpeg"):
+                frame = _jpeg_picture(frame)
+                if frame is None:
+                    return
             for listener in list(self.frame_listeners):  # (none: nobody records, the frame is dropped)
                 try:
                     listener(frame)
@@ -284,6 +302,27 @@ class Link:
                     print(f"bridge frame listener failed: {e}", file=sys.stderr)
         else:
             self.messages.put(frame)
+
+    def adopt_hello(self, frame):
+        """The plugin's hello (a first one, or a reconnect's): what the brain reads of it. A Roblox plugin without a
+        picture of its own gets one from Studio's MCP server when Studio has one (autopilot/studio_mcp.py): its features
+        then say "media"."""
+        self.hello = frame
+        self.last_heartbeat = time.time()
+        if str(frame.get("engine") or "").lower() != "roblox":
+            return
+        if self.media is not None:
+            features = frame.setdefault("features", [])
+            if isinstance(features, list) and "media" not in features:
+                features.append("media")
+                frame["media_via"] = "studio_mcp"
+            return
+        try:
+            from . import studio_mcp
+
+            self.media = studio_mcp.attach(self)
+        except Exception as e:  # (no pictures, the run goes on)
+            print(f"note: no pictures of the Roblox game: {type(e).__name__}: {e}", file=sys.stderr)
 
     def _event(self, event):
         kind = event.get("kind")
@@ -297,6 +336,8 @@ class Link:
             self.logs.append(event)
         elif kind == "session":
             self.session_changes += 1
+            if isinstance(event.get("running"), bool):
+                self.session_running = event["running"]
         for listener in list(self.listeners):
             try:
                 listener(event)
@@ -308,6 +349,11 @@ class Link:
         if self.closed:
             return
         self.closed = why or "closed"
+        if self.media is not None:
+            try:
+                self.media.close()
+            except Exception as e:  # noqa: BLE001
+                print(f"note: the game's pictures didn't stop cleanly: {e}", file=sys.stderr)
         with self._lock:
             pending = list(self._pending.values())
         for entry in pending:
@@ -320,6 +366,19 @@ class Link:
             return self.messages.get(timeout=timeout)
         except queue.Empty:
             return None
+
+
+def _jpeg_picture(picture, args=None):
+    """A picture a plugin sent as a PNG (Roblox's StudioCaptureService) as the JPEG every picture is; None (a frame)
+    or the answer as it came (a capture) when it can't be read."""
+    try:
+        from .studio_mcp import png_to_jpeg
+
+        args = args or {}
+        return png_to_jpeg(dict(picture), args.get("max_dim"), args.get("quality") or 75)
+    except Exception as e:  # noqa: BLE001 - one bad picture is dropped
+        print(f"note: a picture from the game couldn't be read: {type(e).__name__}: {e}", file=sys.stderr)
+        return None if "n" in picture else picture
 
 
 def is_loopback(address):
@@ -668,8 +727,7 @@ def serve_local(host="127.0.0.1", port=8765, wait=None, role="cli", announce_as=
         if resumed:
             link.loopback = is_loopback(ws.remote_address)
             link.auth_token, link.mode = connection_auth(ws)
-            link.hello = first
-            link.last_heartbeat = time.time()
+            link.adopt_hello(first)
             try:
                 ws.send(json.dumps({"type": "welcome", "role": role, "session": link.session,
                                     "features": BRAIN_FEATURES}))

@@ -1,6 +1,6 @@
 """The brain's kit (autopilot.kit through autopilot.engines.roblox) on the test game in Roblox Studio: Game reads, the
 kit frame, movement(), calibrate_look, look_at, sees, walk_to (lanterns collected), jump_to (the crate), go_and_press
-(the lever's ProximityPrompt), the UI, restart. Studio's game view must be focused (see harness.py).
+(the lever's ProximityPrompt), the UI, restart. Studio needn't be in front (see harness.py).
 
     python plugin/roblox/tests/kit_live.py
 """

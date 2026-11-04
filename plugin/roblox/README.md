@@ -20,8 +20,10 @@ your place's scripts and instances to read. The agent itself runs on your comput
 (`autopilot serve`, see [Running from a clone](../../CONTRIBUTING.md#running-from-a-clone)); the plugin connects out to
 it.
 
-It needs a current Roblox Studio (it uses `UserInputService:CreateVirtualInput`, `HttpService:CreateWebStreamClient`
-and `StudioTestService`; tested with Studio 0.745) on Windows or macOS.
+It needs a current Roblox Studio (it uses `UserInputService:CreateVirtualInput`, `HttpService:CreateWebStreamClient`,
+`StudioTestService` and `StudioDeviceSimulatorService`; tested with Studio 0.745) on Windows or macOS. For pictures of
+the game (the run's recording, stills, `describe_frames`), turn on Studio's MCP server once: in Studio, **Assistant**,
+**…**, **Manage MCP Servers**, **Enable Studio as MCP server** (see [Pictures of the game](#pictures-of-the-game)).
 
 ## Install
 
@@ -67,11 +69,11 @@ and is never saved.
    maximum) with **Not a bug** and **Show in level** (selects it in the Explorer). **Run again**, **Report (to copy)**
    (the report as text, selectable) and **Verify a fix** (fills the prompt box).
 
-**Keep Studio's game view focused while a run plays.** Roblox takes no keyboard input while Studio isn't the
-focused window (the mouse still goes in). The plugin notices (a key it sends doesn't reach the game), says so in
-Studio's output and in the run's findings, and meanwhile puts the keys Roblox's own controls read in the way those
-controls do: W/A/S/D and the arrows walk the character, SpaceBar jumps, and a ProximityPrompt's key triggers the
-nearest prompt in reach. Any other key a game binds doesn't reach it until Studio is focused again.
+**Studio needn't be in front while a run plays.** The plugin's keys, mouse, gamepad and touches go in through Studio's
+virtual input, which reaches the game whether or not Studio's game view is the focused window: work in another app
+meanwhile. (Should a key ever not reach the game, the plugin says so in Studio's output and the run's findings, and puts
+the keys Roblox's own controls read in the way those controls do: W/A/S/D and the arrows walk, SpaceBar jumps, a
+ProximityPrompt's key triggers the nearest prompt in reach.)
 
 The **History** lists the last 30 runs (kept in Studio's plugin settings); pick one to show its result and feed again.
 The **Memory** line says how many runs the agent remembers of this game; **Reset memory…** asks in place, then has the
@@ -94,6 +96,11 @@ steering and the result.
 
 ## How Studio and the game work together
 
+(A multiplayer test is the same with more parts: its server and each player's client are Studio processes of their
+own, unnamed in Studio's MCP server's list, each running the plugin. They find the pipe in the test's arguments
+(`StudioTestService:GetTestArgs()`) when the plugin's settings don't say it, player 1's client answers as `client`, the
+others as `client2`, `client3`..., and the pictures are player 1's window's.)
+
 Studio runs a plugin in every DataModel it has: the place being edited (**edit**), and while a play session goes, the
 session's **server** and its player's **client**. They can't reach each other inside Studio, so:
 
@@ -113,6 +120,9 @@ session's **server** and its player's **client**. They can't reach each other in
 - on each side the plugin puts a helper script into the running game (`AutopilotPlaytest`: a Script in
   ServerScriptService, a LocalScript in the player's PlayerScripts) through which it reads and calls the game's
   ModuleScripts: a plugin's own `require` runs a module again for the plugin alone, not the game's copy;
+- **pictures**: a plugin can't read the game's pixels in today's Studio (see [Pictures of the game](#pictures-of-the-game)),
+  so the agent service answers `capture` and `record` itself, through Studio's MCP server; `device` is answered by the
+  editor with no play session and by the client during one;
 - **sockets**: Studio lets each DataModel have only four WebSocket clients, every plugin's counted. The edit plugin
   needs one; when none is free it talks to the agent service over plain HTTP instead (long polls at the configured
   HTTP fallback URL, defaulting to the next port after the WebSocket's). A play session's client can make no HTTP requests at all (only a
@@ -159,20 +169,23 @@ up; roll `-deg(rz)`.
 
 | Request | In Roblox |
 |---|---|
-| `context` | `world` = `/Workspace`, `character` = the local player's character, `controller` = the Player, `camera` = the current camera, `dimension` `3d`, `engine: "roblox"`, `project_dir` `""` (Studio doesn't say where a place's file is), `controls`: the game's ContextActionService actions with their keys, and Roblox's default controls; `camera_type`, `mouse_behavior`, `place_id`, `universe_id`, `input.keys_reach`. |
-| `session` | `start` plays the place (a server and one player), `stop` ends the play session, `restart` stops and plays again (the game's scripts start over, the place as Studio has it). A play session the user started joins by itself. `map` other than the place's name: an error (a place is one level). |
+| `context` | `world` = `/Workspace`, `character` = the local player's character, `controller` = the Player, `camera` = the current camera, `dimension` `3d`, `engine: "roblox"`, `project_dir` `""` (Studio doesn't say where a place's file is), `controls`: the game's ContextActionService actions with their keys, and Roblox's default controls; `camera_type`, `mouse_behavior`, `place_id`, `universe_id`, `input` (`keys_reach`, `needs_focus` false, `touch`, `pad`: the sticks and triggers held), `device` (as `device` `get`). |
+| `session` | `start` plays the place (a server and one player), `stop` ends the play session, `restart` stops and plays again (the game's scripts start over, the place as Studio has it). `players` (2-7) plays it as Studio's multiplayer test does (`StudioTestService:ExecuteMultiplayerTestAsync`: a server and a client per player, each a Studio process with the plugin; a player that doesn't join in 40 s is asked for again through the server's `AddPlayers`); kept for later restarts until another `players`. Answers `{"running", "scene", "players"}`. A play session the user started joins by itself. `map` other than the place's name: an error (a place is one level). |
+| `player` (in any request's args) | Which player a request is for: 1 (the default) is the player Autopilot plays, its client answering as before; n goes to player n's client (`client<n>`: its view, keys, touches, UI, context), and an `rc` the server answers takes `LocalPlayer`, `Character` and `Humanoid` as player n's. A player not in the game: 404. Events from another player's client carry its `player`. `context` has `you` (the player answering) and `players` (`[{"player", "name", "path", "character", "you"}]`). |
 | `levels` | `{"levels": [the place], "open": the place, "playing": the place while it plays}` |
 | `pause` | `RunService:Pause()` / `Run()` on both sides: physics and the game's scripts stop, the plugin goes on answering. |
-| `key` | Unreal key names (W, SpaceBar, LeftShift, One, F5, Enter, LeftMouseButton, MouseX/MouseY in pixels, MouseY positive up, MouseScrollUp/Down, MouseWheelAxis), a KeyCode's name, or a ContextActionService action's name (its first key). Through Studio's virtual input. A press stays down 0.05 s and 2 frames; holds are leased; `seconds` makes a timed hold. MouseX/MouseY with the mouse free hold the right button for the turn (Roblox's default camera turns only while it is held). Gamepad keys: an error (a plugin has no gamepad). |
+| `key` | Unreal key names (W, SpaceBar, LeftShift, One, F5, Enter, LeftMouseButton, MouseX/MouseY in pixels, MouseY positive up, MouseScrollUp/Down, MouseWheelAxis, the `Gamepad_` keys), a KeyCode's name (ButtonA, DPadLeft too), or a ContextActionService action's name (its first key). Through Studio's virtual input, focused or not. A press stays down 0.05 s and 2 frames; holds are leased; `seconds` makes a timed hold. MouseX/MouseY with the mouse free hold the right button for the turn (Roblox's default camera turns only while it is held). Gamepad buttons go in as their KeyCodes (UserInputType Keyboard: ContextActionService actions and InputBegan see the KeyCode); ButtonA also jumps unless the game bound it. `Gamepad_LeftX`/`LeftY` (-1..1) walk the player relative to the camera, `Gamepad_RightX`/`RightY` turn the camera (about 240°/s), `Gamepad_LeftTriggerAxis`/`RightTriggerAxis` past 0.5 are L2/R2: held with `value` (a press pushes for 0.15 s). A key Roblox keeps for its menus (Escape; ButtonB, ButtonStart, DPadUp on a console): 409. |
 | `input` | A ContextActionService action by name: its first key, as `key`. |
 | `move` | `{"direction": kit vector, "seconds", "scale"?, "via"?}`: the player's `Move` toward it every frame, after the PlayerModule's (`via: "humanoid"`, as an analog stick), or W/A/S/D toward it (`via: "keys"`, 8 ways). Answers `{"moved", "via"}`. |
 | `watch` | Pivots sampled every frame (`moved` in kit units, `turned`, `changed size`); with `drawn`, the biggest parts in the thing's own frame and `part shown/hidden`, `light on/off`, `animation started/ended` (the Animator's tracks), `sound started/ended`, `effect started/ended` (particles, fire, beams, trails). |
 | `view` | See below. |
 | `screen` | The visible texts of TextLabels, TextButtons and TextBoxes in the player's PlayerGui (ContentText), keyed `<ScreenGui>.<Name>` (`#2`, `#3` for repeats). |
 | `ui`, `ui_act` | GuiButtons (`button`) and TextBoxes (`text_input`) on screen, with `path`, `class`, `screen` (their middle in viewport pixels, top bar inset included). `click` (and `right_click`, `double_click`) moves the mouse there and presses it: the answer's `fired` says whether the button's `Activated` came. `set` types into a TextBox and submits it (`FocusLost` with Enter); `drag` presses on one and lets go on another. |
-| `pointer` | `{"screen_x", "screen_y"}` (-1..1, y up), `{"world": kit point}` or `{"object": path}`: the mouse put there. Answers `{"x", "y", "screen_x", "screen_y", "on_screen"}`. A ClickDetector is clicked by pointing at its part and pressing LeftMouseButton. |
-| `record`, `capture` | 409 `no picture`: Studio gives a plugin no picture of the game (its screenshots can't be read back). Runs have no recording. |
-| `detectors` | `log_error` (errors the game prints, server and client: LogService), `nan`, `out_of_world` (an unanchored part 50 m below the level's lowest drawn point at the start, or past FallenPartsDestroyHeight), `long_fall` (the player in Freefall for 8 s), `hitch` (a frame over 0.75 s), `hud_fraction`, and `no_input` (keys not reaching the game: Studio not focused). Warnings go as `log` events. |
+| `pointer` | `{"screen_x", "screen_y"}` (-1..1, y up), `{"x", "y"}` (viewport pixels), `{"world": kit point}`, `{"object": path}` or `{"ui": id}`: the mouse put there. Answers `{"x", "y", "screen_x", "screen_y", "on_screen"}`. A ClickDetector is clicked by pointing at its part and pressing LeftMouseButton. |
+| `touch` | A finger: `{"action": "tap" \| "double_tap" \| "long_press" \| "swipe" \| "down" \| "move" \| "up", a spot as `pointer` takes it, "to": spot (a swipe's end), "seconds"}`. While Studio simulates a phone or tablet (`device`) Studio makes the virtual mouse's left button a finger: the game gets real touches (TouchStarted, TouchTap, TouchSwipe, TouchLongPress, Activated; Roblox's on-screen thumbstick and jump button take them). Elsewhere the finger is the mouse's left button. Answers `{"as": "touch" \| "mouse", "x", "y", "screen_x", "screen_y"}`. |
+| `device` | Studio's Device Simulator: `{"device": "phone" \| "tablet" \| "console" \| "vr" \| "desktop" \| a device's id or name, "orientation"?: "portrait" \| "landscape"}` switches it (a phone or tablet turns as the game's StarterGui.ScreenOrientation says unless told), `{"action": "list"}` lists Studio's devices, `{"action": "get"}` says the device now: `{"id", "name", "form", "simulated", "touch", "keyboard", "mouse", "ten_foot", "orientation", "viewport"}`. `session` `start` / `restart` take `device` and `orientation` too. The user's own device comes back when the run ends (or the connection does). |
+| `record`, `capture` | Answered by the agent service, from Studio's MCP server (see [Pictures of the game](#pictures-of-the-game)): `capture` `{"jpeg", "width", "height", "t", "via": "studio_mcp"}`; `record` `start` sends `frame`s a few times a second while a game plays, across play sessions, until `stop`. 409 `no picture: ...` with no game running, or when Studio's MCP server is off. A Studio whose StudioCaptureService works gives the plugin its own pictures (its hello then says `media`; PNGs, made JPEGs by the agent service). |
+| `detectors` | `log_error` (errors the game prints, server and client: LogService), `nan`, `out_of_world` (an unanchored part 50 m below the level's lowest drawn point at the start, or past FallenPartsDestroyHeight), `long_fall` (the player in Freefall for 8 s), `hitch` (a frame over 0.75 s), `hud_fraction`, and `no_input` (a key that didn't reach the game). Warnings go as `log` events. |
 | `codex_manifest`, `codex_read` | Every script of the place as `src/<Service>/.../<Name>.server.luau` (a Script), `.client.luau` (a LocalScript, or a Script with RunContext Client), `.luau` (a ModuleScript), a script's children in a folder of its name; plus `.autopilot/summary.txt` (the place, Workspace and StarterPlayer settings, tags, every script with where it runs) and `.autopilot/tree/<Service>.txt` (each service's instances: class, place and size, attributes, tags, values, texts; runs of identical siblings told once with their count). |
 | `find` | `{"class"?, "name"?, "limit"?, "things"?}`: `class` is a Roblox class (`IsA`), `tag:<name>` (CollectionService; a plain tag name works when no class has it), or the name of a script inside a model; `things: true` the Workspace's things (models and parts at the top or in folders; a model of models is a folder). |
 | `transforms` | `{path: {"location", "rotation", "velocity", "center", "extent"} \| null}`: the pivot, the assembly's velocity, the bounding box (world-aligned), in the kit frame. |
@@ -194,17 +207,37 @@ height (a walkable slope or a step is gone up), rays down for drops (`by`: wall,
 answer's `omitted`): `held`, `scene.sun`, `openings`, `ways_up`, `lane`, slope ends, `body.under` / `overhead`,
 `highlighted`, `limp`.
 
+## Pictures of the game
+
+A Studio plugin can't read the game's pixels today: CaptureService's screenshots are textures a script can show but
+never read back (an EditableImage refuses them), and StudioCaptureService, Studio's screenshots for plugins, answers
+"Feature not supported yet" (the plugin uses it once Studio turns it on: `src/Media.luau`). Studio's own MCP server
+can: its `screen_capture` tool gives the game view (the 3D view and the game's own UI, not Roblox's top bar) whether or
+not Studio is in front. So for a Roblox plugin the agent service, which runs on the same computer, starts Studio's MCP
+server (`autopilot/studio_mcp.py`) and answers `capture` and `record` from it: runs get a recording, stills and
+`describe_frames` as in the other engines.
+
+- Turn it on once in Studio: **Assistant**, **…**, **Manage MCP Servers**, **Enable Studio as MCP server**.
+- The agent service starts `/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP` on macOS and `cmd.exe /c
+  %LOCALAPPDATA%\Roblox\mcp.bat` on Windows (Roblox's own command lines); `AUTOPILOT_STUDIO_MCP` sets another,
+  `AUTOPILOT_STUDIO_MCP=off` turns pictures off. With several Studios open it takes the one whose place the plugin's
+  hello names.
+- Pictures come at most a few a second (each is a round trip through Studio), only while a game plays.
+
 ## Limitations
 
-- **No picture.** Studio gives a plugin no pixels of the game view, so runs have no recording and the agent can't look
-  at frames: requests about how something looks are settled on what `view` tells (parts, transparency, colours,
-  lights, animations, sounds, effects, texts), and the report says so.
-- **Focus.** Keyboard input needs Studio's game view focused (see above).
-- **No gamepad**, no touch: keyboard and mouse only.
+- **Gamepad sticks as the game reads them.** Studio's virtual input has keys and a mouse, not a gamepad: buttons go in as
+  their KeyCodes (an InputObject of UserInputType Keyboard), and the sticks and analog triggers as Roblox's own gamepad
+  controls use them (walking, the camera, L2/R2). A game that reads a stick's position itself (InputChanged with
+  Thumbstick1, `GetGamepadState`) or checks for `Gamepad1` doesn't see them; `UserInputService.GamepadEnabled` stays
+  false.
+- **One finger.** A touch is the virtual mouse's left button, so there is one finger at a time: no pinch or two-finger
+  rotate (`MouseScrollUp`/`Down` zoom instead).
 - **No headless or command-line runs** (CI): a Roblox game runs only in Studio (or Roblox's clients). Bench runs
   (`bench/run_autopilot.py`) need another engine.
 - **One level.** A place is one level; teleporting between a universe's places isn't played.
-- **One player.** A play session has one player (Studio's local multiplayer test isn't driven).
+- **Players.** A multiplayer test's players are Studio's own test players (Player1, Player2...), up to 7; the device
+  simulator (touch, a console's interface) is for a game of one player.
 - **Client WebSocket capacity.** Roblox forbids HTTP requests from a Play client, including plugins. The editor and
   Play server can fall back to HTTP when their WebSocket slots are occupied, but the client needs one free slot.
   If all four are occupied, Autopilot reports this in Studio's Output and retries until a slot becomes available.
@@ -235,21 +268,24 @@ All paths are under `plugin/roblox/`.
 | File | What it does |
 |---|---|
 | `src/Main.luau` | The start: which DataModel this is (edit, server, client) and which parts run there. |
-| `src/Editor.luau` | The edit DataModel's link to the agent service: the hello, runs, `session` (play, stop, restart), `levels`, the codex, routing requests to the play session's sides, the account and setup frames. |
+| `src/Editor.luau` | The edit DataModel's link to the agent service: the hello, runs, `session` (play, stop, restart, on a device), `levels`, `device`, the codex, routing requests to the play session's sides, the account and setup frames. |
 | `src/Dock.luau` | The dock: connection, account (Aura sign-in, BYOK), memory, the composer, the live run (stages, Stop, Steer), the feed, the result, history, settings. |
 | `src/Host.luau` | A play session's side joined to the pipe: requests answered in threads of their own, events once a frame, attach and detach. |
-| `src/Client.luau` | The client's ops: input (keys, holds, the mouse), move, watch, view, screen, ui, pointer, find, transforms, pose, movement, context, pause. |
+| `src/Client.luau` | The client's ops: input (keys, holds, the mouse, the gamepad), touch, device, move, watch, view, screen, ui, pointer, find, transforms, pose, movement, context, pause, capture, record. |
 | `src/Server.luau` | The server's ops: rc, find, transforms, pause, ending the play session. |
 | `src/Link.luau` | The connection out: a WebSocket, else HTTP long polls; reconnect with backoff. |
 | `src/Modules.luau` | The helper script on each side: the game's ModuleScripts as the game has them. |
-| `src/Keys.luau` | Unreal key names as virtual input; the mouse; ContextActionService actions. |
-| `src/Fallback.luau` | Keys without focus: walking, jumping, prompts as Roblox's own controls put them. |
+| `src/Keys.luau` | Unreal key names as virtual input; the mouse; gamepad buttons; ContextActionService actions; points on the screen as virtual input takes them. |
+| `src/Pad.luau` | The gamepad's sticks and triggers, as Roblox's gamepad controls take them; ButtonA's jump. |
+| `src/Device.luau` | `device`: Studio's Device Simulator (a phone or tablet makes the game a touch device). |
+| `src/Media.luau` | `capture`, `record` from StudioCaptureService, once Studio gives plugins pictures. |
+| `src/Fallback.luau` | Keys for a game that took none: walking, jumping, prompts as Roblox's own controls put them. |
 | `src/Rc.luau`, `src/Values.luau`, `src/Paths.luau` | `rc`: reads, writes, calls, descriptions; values to and from JSON; instances by path. |
-| `src/World.luau`, `src/Sight.luau`, `src/Ui.luau` | find, transforms, pose, movement; view, sonar, watch; screen, ui, ui_act, pointer. |
+| `src/World.luau`, `src/Sight.luau`, `src/Ui.luau` | find, transforms, pose, movement; view, sonar, watch; screen, ui, ui_act, pointer, touch. |
 | `src/Codex.luau`, `src/Detectors.luau` | The codex; the in-game detectors. |
 | `src/Frame.luau`, `src/Json.luau`, `src/Settings.luau` | The kit frame; JSON (empty objects, NaN); the plugin's settings. |
 | `dev/` | The development loader (`AutopilotDev.server.luau`) and its client relay (`DevRelay.luau`): never built into the plugin. |
-| `tests/` | The test game (`testgame.luau`) and the live tests (`smoke.py`, `kit_live.py`, `harness.py`). |
+| `tests/` | The test game (`LanternGrove.rbxl`, built by `testgame.luau`), the live tests (`smoke.py`, `kit_live.py`, `multiplayer.py`, `harness.py`) and the focused regressions (`Regressions_Test.luau`, `client_disconnect.luau`). |
 
 ### Building and the development loop
 
@@ -279,16 +315,19 @@ releases keyboard, fallback movement, and camera inputs. Use dummy settings and 
 Pass `true` as its third argument to also occupy the client's WebSocket slots, check its diagnostic, free one slot,
 and verify automatic recovery without manually reconnecting.
 
-1. Open a Baseplate in Studio with the plugin (built or from the dev loader), and build the test game into it:
-   paste `tests/testgame.luau` into the command bar (or `python tools/roblox_dev.py eval - <
-   plugin/roblox/tests/testgame.luau`). **Lantern Grove** has six lanterns to collect (a CollectionService tag), a
+1. Open the test game in Studio with the plugin (built or from the dev loader): `tests/LanternGrove.rbxl`. Or build
+   it into an empty Baseplate: paste `tests/testgame.luau` (its source) into the command bar (or `python
+   tools/roblox_dev.py eval - < plugin/roblox/tests/testgame.luau`). After changing `testgame.luau`, run it in
+   `LanternGrove.rbxl` and save the place, so the two stay the same. **Lantern Grove** has six lanterns to collect (a CollectionService tag), a
    lever with a ProximityPrompt that opens a gate, a crate to jump on, a pond, three same-named posts, a mailbox with a
    ClickDetector, a module with the game's state, remotes, a HUD (`Lanterns n / 6`), a menu (a button, a text box) and a
    ContextActionService action (Q waves). Two planted bugs: the mailbox's script indexes nil when clicked
-   (`log_error`), and the gate's door falls through the ground once opened (`out_of_world`).
-2. Stop any `autopilot serve` (the tests listen where the plugin connects), click into Studio's game view and leave it
-   focused, and run `python plugin/roblox/tests/smoke.py` (every request) and `python plugin/roblox/tests/kit_live.py`
-   (the brain's kit: walk_to, look_at, jump_to, go_and_press, the UI, restart). `AUTOPILOT_ROBLOX_TEST_PORT` sets the
+   (`log_error`), and the gate's door falls through the ground once opened (`out_of_world`). For two players, a basket
+   to pick up (E), hand to another player (G at them) and load onto a cart (E), which only takes a basket that was
+   handed over; its planted bug: the HUD of the player it was handed to never says they carry it.
+2. Stop any `autopilot serve` (the tests listen where the plugin connects; Studio needn't be in front), and run `python plugin/roblox/tests/smoke.py` (every request) and `python plugin/roblox/tests/kit_live.py`
+   (the brain's kit: walk_to, look_at, jump_to, go_and_press, the UI, restart) and `python
+   plugin/roblox/tests/multiplayer.py` (two players: the basket's hand-off). `AUTOPILOT_ROBLOX_TEST_PORT` sets the
    port when the plugin is set to another than 8765.
 
 ## License

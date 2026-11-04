@@ -42,11 +42,36 @@
 - **Input**: keys are Unreal names as everywhere (W, SpaceBar, E, LeftShift, One, LeftMouseButton, MouseX, MouseY,
   MouseScrollUp...), or a Roblox KeyCode's name (`Return`, `KeypadOne`). They go in as a player's keyboard and mouse do
   (Studio's virtual input), so UserInputService, ContextActionService, ProximityPrompts and the default PlayerModule
-  (W/A/S/D walking, SpaceBar jumping) all see them. An action the game bound with ContextActionService can be pressed by
-  name (`game.press("Sprint")`: its first key); `game.context()["controls"]` lists them. There is no gamepad.
+  (W/A/S/D walking, SpaceBar jumping) all see them, whether or not Studio's window is in front. An action the game
+  bound with ContextActionService can be pressed by name (`game.press("Sprint")`: its first key);
+  `game.context()["controls"]` lists them. A key Roblox keeps for its own menus (Escape) is refused with a 409.
   A ProximityPrompt is triggered by its key (`E` by default) while the player is within its MaxActivationDistance and
   it is shown; one with a HoldDuration needs `hold_for(game, "E", hold + 0.2)`. A ClickDetector is clicked by pointing
   at the part (`game.request("pointer", {"object": path})`) and pressing LeftMouseButton.
+- **Gamepad**: `Gamepad_FaceButton_Bottom` (ButtonA), `Gamepad_FaceButton_Right` (ButtonB), `_Left` (ButtonX), `_Top`
+  (ButtonY), `Gamepad_LeftShoulder`/`RightShoulder` (L1/R1), `Gamepad_LeftTrigger`/`RightTrigger` (L2/R2),
+  `Gamepad_DPad_Up`..., `Gamepad_Special_Right` (Start), or Roblox's names (`ButtonA`, `DPadLeft`): each goes in as its
+  KeyCode, so the game's ContextActionService actions bound to it and InputBegan handlers that check the KeyCode get
+  it (the InputObject's UserInputType is Keyboard, not Gamepad1: code that checks for a gamepad by UserInputType
+  doesn't see it). ButtonA also jumps, as Roblox's gamepad controls do, unless the game bound ButtonA itself. The sticks
+  and analog triggers are axes for `game.hold(key, value=...)` (or a press for a moment): `Gamepad_LeftX` /
+  `Gamepad_LeftY` (-1..1, y forward) walk the player relative to the camera as Roblox's gamepad controls do,
+  `Gamepad_RightX` / `Gamepad_RightY` turn the camera (about 240 degrees a second full over), and
+  `Gamepad_LeftTriggerAxis` / `Gamepad_RightTriggerAxis` past 0.5 are L2/R2. Code that reads a stick itself (InputChanged
+  with Thumbstick1, GetGamepadState) sees nothing: drive what it drives some other way and say so.
+- **Devices and touch**: `game.request("device", {"device": "phone"})` makes Studio simulate a phone (also `tablet`,
+  `console`, `vr`, `desktop` for none, or a device's name from `{"action": "list"}`; `orientation`: `portrait` or
+  `landscape`, else the game's own), as a player on that device sees the game: its screen size, the game's mobile UI,
+  `TouchEnabled`, Roblox's on-screen thumbstick and jump button (a console: Roblox's ten-foot interface). A session's
+  start takes `device` too (`game.request("session", {"action": "restart", "device": "phone"})`), and the user's own
+  device comes back when the run ends. On a phone or tablet, `game.request("touch", {...})` is a finger:
+  `{"action": "tap", "object": path}` (or `"ui"`: an id from `game.ui()`, `"screen_x"/"screen_y"` -1..1, `"x"/"y"`,
+  `"world"`), `"double_tap"`, `"long_press"` (`seconds`), `"swipe"` with `"to": {spot}`, and `"down"` / `"move"` /
+  `"up"` for a drag (the on-screen thumbstick: down at its spot, move up from there, hold, up). The game gets real
+  touches (TouchStarted, TouchTap, TouchSwipe, a GUI button's Activated); the answer's `as` is `"touch"`. Off a touch
+  device the finger is the mouse's left button (`as` `"mouse"`). On a touch device the camera turns by a finger's drag
+  (a swipe on the right half of the screen), not by MouseX or the right stick. `game.context()["device"]` and
+  `["input"]` say what the game gets now.
 - **Camera**: Roblox's default camera turns only while the right mouse button is held (a player drags); the plugin holds
   it for `game.turn` / `game.mouse` when the mouse is free, so `look_at` and `walk_to` work, and when the game locks the
   mouse (first person, shift lock, its own camera) it moves the mouse alone. `game.calibrate_look()` measures either.
@@ -62,12 +87,24 @@
 - **Sessions**: a run plays the place in Studio as the Play button does (a server and one player). `game.restart()`
   stops the session and plays again: the server's and client's scripts start over, the place as it is saved in Studio
   (nothing a session changed stays). Game time (`game.t`) is the Workspace's DistributedGameTime, from 0 in each session.
-- **What the plugin leaves out**: Studio gives a plugin no picture of the game, so there are no recordings or frames
-  to describe (`describe_frames` has nothing): settle a request about how something looks by what `game.view` tells
-  (parts shown, transparency, colours read with `game.get`, lights, animations, sounds, effects, texts) and say so.
-  `game.view` tells visible things (name, path, class, tags, center, size, distance, screen position, crosshair_on,
-  health of a Humanoid, look: parts, lights, animations, sounds, effects, texts) and the body (on_ground, falling,
-  state, health, standing_on, touching, floor slope) and, with `sonar=True`, the sonar ways. It has no `held`,
-  `openings`, `ways_up` or `lane` (listed in its `omitted`): `walk_to` finds no way up to a raised goal by itself, so walk
-  it to a ramp's or stairs' foot and top first. Detectors: errors and warnings the game's scripts print (server and
-  client), NaN positions, parts falling out of the world, long falls, hitches, on-screen counts above their maximum.
+- **Several players**: most Roblox games are multiplayer, and some bugs only show with two players (state kept per
+  player, what one player does reaching another's screen, handing things over, teams). `game.restart(players=2)` plays
+  the place as Studio's multiplayer test does (a server and a client per player, each a Studio window of its own:
+  slower to start, up to a minute) and `game.player(2)` is player 2: its keys, view, screen, UI and the kit's
+  controllers act as player 2, and `game.get`/`game.set` of `Character`, `Humanoid`, `LocalPlayer` through it are player
+  2's (`game.player(2).set("Character", "position", ...)`). The players are Player1, Player2... (`game.players()`);
+  `game` is player 1, and another player's character is a thing in `view` with `player` true. Compare what each player
+  sees (`game.screen()` against `game.player(2).screen()`) to check that a change reached everyone. A ProximityPrompt
+  on another player shows only within a few studs. `game.restart(players=1)` goes back to one. The device simulator
+  (touch) is for one player only.
+- **Pictures**: the game's view (3D and the game's own UI, not Roblox's top bar) comes from Studio itself, through
+  Studio's MCP server (the agent service starts it beside Studio), so recordings and `describe_frames` work as in the
+  other engines while a game plays; Studio must have its MCP server on (Assistant, ..., Manage MCP Servers). When it
+  isn't, there are no frames: settle a request about how something looks by what `game.view` tells (parts shown,
+  transparency, colours read with `game.get`, lights, animations, sounds, effects, texts) and say so.
+- **What `view` tells**: visible things (name, path, class, tags, center, size, distance, screen position,
+  crosshair_on, health of a Humanoid, look: parts, lights, animations, sounds, effects, texts) and the body (on_ground,
+  falling, state, health, standing_on, touching, floor slope) and, with `sonar=True`, the sonar ways. It has no `held`,
+  `openings`, `ways_up` or `lane` (listed in its `omitted`): `walk_to` finds no way up to a raised goal by itself, so
+  walk it to a ramp's or stairs' foot and top first. Detectors: errors and warnings the game's scripts print (server
+  and client), NaN positions, parts falling out of the world, long falls, hitches, on-screen counts above their maximum.

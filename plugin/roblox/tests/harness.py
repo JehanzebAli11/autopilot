@@ -2,10 +2,10 @@
 at its default address), checks that print PASS / FAIL, and a way into Studio's DataModels for a test's setup (the
 dev loader's eval, tools/roblox_dev.py: only when the plugin runs from it).
 
-The tests need Roblox Studio open on a place with the test game in it (tests/testgame.luau: run it in Studio's command
-bar on an empty Baseplate), the plugin in Studio (the built Autopilot.rbxmx, or the dev loader), and nothing else on
-port 8765 (no `autopilot serve`). Studio's game view must be the focused window while a play session's input tests run:
-Roblox drops keyboard and mouse input otherwise.
+The tests need Roblox Studio open on the test game: tests/LanternGrove.rbxl (the place, saved), or an empty Baseplate
+with tests/testgame.luau run in Studio's command bar (it builds the same game). Also the plugin in Studio (the built Autopilot.rbxmx, or the dev loader), and nothing else on
+port 8765 (no `autopilot serve`). Studio needn't be the window in front: the plugin's input reaches the game either way.
+For the game's pictures, Studio's MCP server must be on (Assistant, ..., Manage MCP Servers).
 """
 
 import os

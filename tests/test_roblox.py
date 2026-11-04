@@ -150,7 +150,9 @@ def test_prompt_roblox_section_is_general():
     section = text[text.index("## The engine: Roblox"):]
     for needle in ("server", "client", "client:", "server:", "@", "tag:", "leaderstats", "ModuleScript", "to_kit",
                    "28", "ProximityPrompt", "ClickDetector", "right mouse button", "game.restart()", "omitted",
-                   "no picture"):
+                   "Gamepad_LeftX", "Gamepad_FaceButton_Bottom", '"device"', '"touch"', "TouchEnabled",
+                   "Studio's MCP server", "whether or not Studio's window is in front", "game.player(2)",
+                   "players=2"):
         assert needle in section, needle
     # nothing of a particular game (the test game's names stay out of the brain)
     for word in ("Lantern", "Grove", "Mailbox", "Crate", "Lever", "Gate", "Pond", "GameState", "Ring", "Wave"):
@@ -181,6 +183,13 @@ def test_the_plugin_builds_as_one_model_with_every_module(tmp_path):
     assert item.find("Properties/ProtectedString").text == "local s = [[a]]>b]]\nreturn {}"
 
 
+def test_the_test_game_is_saved_as_a_place():
+    tests = os.path.join(ROOT, "plugin", "roblox", "tests")
+    with open(os.path.join(tests, "LanternGrove.rbxl"), "rb") as f:
+        assert f.read(8) == b"<roblox!"  # (Studio's binary place file)
+    assert os.path.exists(os.path.join(tests, "testgame.luau"))
+
+
 def test_every_module_the_plugin_requires_is_there():
     sources = _sources()
     for name, src in sources.items():
@@ -199,7 +208,8 @@ def test_the_plugin_answers_every_op_the_brain_needs():
     answered |= set(re.findall(r'op == "(\w+)"', editor))
     needed = set(bridge.required_ops({"engine": "roblox"}))
     assert needed <= answered, needed - answered
-    assert {"levels", "codex_manifest", "codex_read", "pointer", "move", "pause"} <= answered
+    assert {"levels", "codex_manifest", "codex_read", "pointer", "move", "pause", "touch", "device", "capture",
+            "record"} <= answered
 
 
 def test_the_plugins_hello_is_what_the_brain_reads():
@@ -207,9 +217,34 @@ def test_the_plugins_hello_is_what_the_brain_reads():
     hello = editor[editor.index('local h: any = { type = "hello"'):]
     hello = hello[:hello.index("}\n")]
     for field in ('engine = "roblox"', 'host = "editor"', "protocol = Link.PROTOCOL", '"levels"', '"timed_hold"',
-                  "share ="):
+                  '"touch"', '"gamepad"', '"device"', '"players"', "share ="):
         assert field in hello, field
-    assert '"media"' not in hello  # (Studio gives a plugin no picture of the game)
+    # (pictures: "media" only when Studio gives the plugin its own, StudioCaptureService; else the agent service takes
+    # them from Studio's MCP server and adds it: tests/test_studio_mcp.py)
+    assert '"media"' not in hello and 'if self.media then\n\t\ttable.insert(h.features, "media")' in editor
+
+
+def test_the_plugin_takes_gamepad_and_touch():
+    """Gamepad keys by Unreal's names (buttons as KeyCodes, sticks and triggers for Pad.luau), a finger (`touch`), and
+    the devices of Studio's simulator by kind."""
+    sources = _sources()
+    keys = sources["Keys"]
+    for fkey, code in (("Gamepad_FaceButton_Bottom", "ButtonA"), ("Gamepad_FaceButton_Right", "ButtonB"),
+                       ("Gamepad_LeftShoulder", "ButtonL1"), ("Gamepad_RightTrigger", "ButtonR2"),
+                       ("Gamepad_DPad_Left", "DPadLeft"), ("Gamepad_Special_Right", "ButtonStart")):
+        assert re.search(rf'{fkey} = "{code}"', keys), fkey
+    for axis in ("Gamepad_LeftX", "Gamepad_LeftY", "Gamepad_RightX", "Gamepad_RightY", "Gamepad_LeftTriggerAxis",
+                 "Gamepad_RightTriggerAxis"):
+        assert f"{axis} = {{" in keys, axis
+    assert "SendPointerAction(probe, { Wheel = 1e-4 })" in keys  # (the simulator's offset, measured)
+    ui = sources["Ui"]
+    for action in ("tap", "double_tap", "long_press", "swipe", "down", "move", "up"):
+        assert f'"{action}"' in ui, action
+    device = sources["Device"]
+    for kind in ("phone", "tablet", "console", "vr"):
+        assert re.search(rf"^\t{kind} = {{ form = ", device, re.M), kind
+    assert "StudioDeviceSimulatorService" in device and "device_before" in device
+    assert "needs_focus = false" in sources["Client"]
 
 
 def test_the_plugin_compiles():
@@ -223,3 +258,70 @@ def test_the_plugin_compiles():
     for path in paths:
         r = subprocess.run([exe, "--text", path], capture_output=True, text=True)
         assert r.returncode == 0, f"{path}: {r.stdout[-500:]}{r.stderr[-500:]}"
+
+
+class PlayersLink:
+    def __init__(self):
+        self.hello = {"project": "Sky Farm", "engine": "roblox", "features": ["levels", "timed_hold", "players"]}
+        self.sent = []
+        self.game_time = 1.0
+
+    def request(self, op, args=None, timeout=None):
+        self.sent.append(("request", op, dict(args or {})))
+        if op == "context":
+            n = (args or {}).get("player", 1)
+            return {"character": f"/Workspace/Player{n}", "controller": f"/Players/Player{n}", "you": n,
+                    "players": [{"player": 1, "name": "Player1"}, {"player": 2, "name": "Player2"}]}
+        if op == "session":
+            return {"running": True, "players": args.get("players", 1)}
+        return {}
+
+    def post(self, op, args=None):
+        self.sent.append(("post", op, dict(args or {})))
+
+
+def test_one_brain_several_bodies():
+    """game.player(n): another player of a multiplayer game, its requests sent as player n's; its keys held apart and
+    renewed and let go with the game's."""
+    link = PlayersLink()
+    game = Game(link)
+    assert game.player(1) is game and game.index == 1
+    two = game.player(2)
+    assert two is game.player(2) and two.index == 2 and two.player(1) is game and two.player(3) is game.player(3)
+    assert game.pawn == "/Workspace/Player1" and two.pawn == "/Workspace/Player2"
+    assert [p["player"] for p in game.players()] == [1, 2]
+    two.hold("W")
+    game.hold("D")
+    assert two.held() == {"W": None} and game.held() == {"D": None}
+    link.sent.clear()
+    game.renew()
+    renewed = {(a.get("player", 1), a["key"]) for kind, op, a in link.sent if op == "key"}
+    assert renewed == {(1, "D"), (2, "W")}
+    link.sent.clear()
+    two.renew()  # (a body renews its own only)
+    assert {a["key"] for _, op, a in link.sent if op == "key"} == {"W"}
+    link.sent.clear()
+    game.release_all()
+    assert not two.held() and not game.held()
+    assert {a.get("player", 1) for _, op, a in link.sent if op == "key" and a.get("mode") == "release_all"} == {1, 2, 3}
+    # (writes are the run's, whichever body made them)
+    two.set("Character", "position", {"x": 1}, why="setup")
+    assert game.writes and game.writes[-1]["why"] == "setup"
+    link.sent.clear()
+    game.restart(players=2)
+    session = [a for kind, op, a in link.sent if op == "session"][0]
+    assert session == {"action": "restart", "players": 2}
+
+
+def test_the_plugin_plays_several_players():
+    """A multiplayer test (ExecuteMultiplayerTestAsync), a request's `player` going to that player's client, the
+    server's rc taking the short names as that player's, and the clients finding the pipe in the test's arguments."""
+    sources = _sources()
+    editor = sources["Editor"]
+    assert "ExecuteMultiplayerTestAsync(want, testArgs)" in editor and 'op = "add_players"' in editor
+    assert "Host.clientSide(n)" in editor and "No player " in editor
+    assert "add_players = function" in sources["Server"] and "Paths.forPlayer" in sources["Server"]
+    host = sources["Host"]
+    assert "GetTestArgs()" in host and 'return if (n or 1) <= 1 then "client" else "client" .. tostring(n)' in host
+    assert "Host.clientSide(index)" in sources["Client"] and "players = players()" in sources["Client"]
+    assert "function Paths.forPlayer" in sources["Paths"] and "p.UserId < 0" in sources["Paths"]

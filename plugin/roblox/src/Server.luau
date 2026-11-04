@@ -1,7 +1,8 @@
 --!strict
 -- The play session's server: the game's authoritative state. Answers rc (reads, writes and calls on the server's
--- instances and modules: what the game's Scripts see and change), find and transforms on the server's instances,
--- pause, and ends the play session (`end_test`, StudioTestService:EndTest). Runs the server's detectors.
+-- instances and modules: what the game's Scripts see and change; LocalPlayer, Character and Humanoid are the request's
+-- `player`'s), find and transforms on the server's instances, pause, adds players to a multiplayer test
+-- (`add_players`), and ends the play session (`end_test`, StudioTestService:EndTest). Runs the server's detectors.
 local RunService = game:GetService("RunService")
 
 local Detectors = require(script.Parent.Detectors)
@@ -22,7 +23,23 @@ function Server.start(plugin: Plugin)
 
 	local ops: { [string]: any } = {
 		rc = function(args)
+			local n = tonumber(args.player) or 1
+			if n > 1 and type(args.body) == "table" and args.body.objectPath ~= nil then
+				args.body.objectPath = Paths.forPlayer(tostring(args.body.objectPath), n)
+			end
 			return Rc.handle(tostring(args.verb or ""), args.body)
+		end,
+		-- `add_players`: more players in a multiplayer test (Studio starts each its own client, as its Server &
+		-- Clients test does): the editor asks when fewer joined than it asked for
+		add_players = function(args)
+			local n = math.clamp(tonumber(args.count) or 1, 1, 7)
+			local ok, err = pcall(function()
+				game:GetService("StudioTestService"):AddPlayers(n)
+			end)
+			if not ok then
+				return false, "Studio didn't add players: " .. tostring(err), 409
+			end
+			return true, { asked = n }
 		end,
 		find = function(args)
 			return true, World.find(args)

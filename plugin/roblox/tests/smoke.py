@@ -1,6 +1,7 @@
 """Every request against the test game (tests/testgame.luau) in Roblox Studio: the editor's own answers, the play
 session started and stopped, reads, writes and calls on both sides, the kit-frame ops, the player's input, the UI, the
-detectors, the codex. Run it with Studio open on the test game and its game view focused (see harness.py):
+detectors, the codex, the gamepad, touches on a simulated phone, and the game's pictures (when Studio's MCP server is
+on). Run it with Studio open on the test game (see harness.py); Studio needn't be in front:
 
     python plugin/roblox/tests/smoke.py
 """
@@ -17,8 +18,10 @@ def main():
     h = link.hello
     check("hello: engine roblox, host editor, protocol 1", h.get("engine") == "roblox" and h.get("host") == "editor"
           and h.get("protocol") == 1, str(h))
-    check("hello: features levels and timed_hold, no media", {"levels", "timed_hold"} <= set(h.get("features") or [])
-          and "media" not in (h.get("features") or []), str(h.get("features")))
+    check("hello: features levels, timed_hold, touch, gamepad, device", {"levels", "timed_hold", "touch", "gamepad",
+          "device"} <= set(h.get("features") or []), str(h.get("features")))
+    media = "media" in (h.get("features") or [])
+    print(f"  pictures: {h.get('media_via') or ('the plugin' if media else 'none (Studio MCP server off?)')}")
 
     # -- the editor, no play session ------------------------------------------------------------------------------
     req("session", {"action": "stop"}, timeout=60)
@@ -171,13 +174,17 @@ def main():
     # input
     before = req("pose")
     req("key", {"key": "W", "mode": "hold", "lease": 0.6})
+    speeds = []
     for _ in range(5):
         time.sleep(0.3)
         req("key", {"key": "W", "mode": "hold", "lease": 0.6})
+        v = req("pose")["velocity"]
+        speeds.append(round((v["X"] ** 2 + v["Y"] ** 2) ** 0.5))
     req("key", {"key": "W", "mode": "release"})
     after = req("pose")
     moved = ((after["at"]["X"] - before["at"]["X"]) ** 2 + (after["at"]["Y"] - before["at"]["Y"]) ** 2) ** 0.5
-    check("key W held walks the player", moved > 200, f"moved {moved:.0f} cm")
+    check("key W held walks the player", moved > 200, f"moved {moved:.0f} cm, speeds {speeds} cm/s, input "
+          f"{req('context').get('input')}, a text box focused: {req('screen', {'ui': True}).get('ui')}")
     y0 = req("pose")["yaw"]
     req("key", {"key": "MouseX", "mode": "press", "value": 60})
     time.sleep(0.6)
@@ -193,10 +200,57 @@ def main():
     expect("a ContextActionService action by name (Wave: Q)", lambda: until(lambda: waves() == before_waves + 1, 3),
            lambda r: r)
     try:
-        req("key", {"key": "Gamepad_FaceButton_Bottom", "mode": "press"})
-        check("a gamepad key is refused", False)
+        req("key", {"key": "Escape", "mode": "press"})
+        check("Escape (Roblox's menu) is refused", False)
     except BridgeError as e:
-        check("a gamepad key is refused", "gamepad" in e.error, e.error)
+        check("Escape (Roblox's menu) is refused", e.status == 409 and "menus" in e.error, e.error)
+
+    # the gamepad: ButtonA jumps (Roblox's gamepad controls), the left stick walks, the right stick turns
+    z0 = req("pose")["feet"]["Z"]
+    req("key", {"key": "Gamepad_FaceButton_Bottom", "mode": "hold", "seconds": 0.2})
+    top = z0
+    for _ in range(10):
+        time.sleep(0.08)
+        top = max(top, req("pose")["feet"]["Z"])
+    check("Gamepad_FaceButton_Bottom (ButtonA) jumps", top - z0 > 80, f"{z0} -> {top}")
+    time.sleep(1.0)
+    # (in the open, away from the grove's things: its speed while held)
+    req("rc", {"verb": "property", "body": {"objectPath": "Character", "propertyName": "position", "propertyValue": {
+        "position": {"x": 40, "y": 4, "z": 40}}, "access": "WRITE_ACCESS"}})
+    time.sleep(1.0)
+    req("key", {"key": "Gamepad_LeftY", "mode": "hold", "value": 1, "seconds": 1.0})
+    time.sleep(0.5)
+    v = req("pose")["velocity"]
+    speed = (v["X"] ** 2 + v["Y"] ** 2) ** 0.5
+    time.sleep(0.7)
+    check("Gamepad_LeftY held walks the player", speed > 200, f"{speed:.0f} cm/s")
+    y0 = req("pose")["yaw"]
+    req("key", {"key": "Gamepad_RightX", "mode": "hold", "value": 1, "seconds": 0.3})
+    time.sleep(0.8)
+    y1 = req("pose")["yaw"]
+    check("Gamepad_RightX turns the view right", 20 < ((y1 - y0 + 180) % 360 - 180) < 150, f"{y0} -> {y1}")
+    expect("context: input and device", lambda: req("context"), lambda r: r["input"]["needs_focus"] is False
+           and r["device"]["touch"] is False and "pad" in r["input"])
+
+    # pictures
+    if media:
+        shot = expect("capture: the game's picture", lambda: req("capture", {"max_dim": 640}, timeout=30),
+                      lambda r: r["jpeg"] and 0 < r["width"] <= 640)
+        frames = []
+        link.frame_listeners.append(frames.append)
+        expect("record start", lambda: req("record", {"action": "start", "fps": 4, "max_dim": 480}),
+               lambda r: r["recording"] is True)
+        time.sleep(3.0)
+        req("record", {"action": "stop"})
+        check("record: frames come while the game plays", len(frames) >= 3, f"{len(frames)} frames")
+        if shot:
+            import base64
+            import os
+            import tempfile
+            out = os.path.join(tempfile.gettempdir(), "autopilot-roblox-capture.jpg")
+            with open(out, "wb") as f:
+                f.write(base64.b64decode(shot["jpeg"]))
+            print(f"  (the picture: {out})")
 
     # watch
     expect("watch: the player walking moves", lambda: _watch_walk(req, ctx["character"]),
@@ -233,6 +287,27 @@ def main():
     check("detector log_error: the mailbox's script error", bool(found), "")
     if found:
         print(f"  log_error: {found[0]['finding']['summary']}")
+
+    # a phone: Studio's Device Simulator, real touches
+    phone = expect("session restart on a phone", lambda: req("session", {"action": "restart", "device": "phone"},
+                                                             timeout=120), lambda r: r["running"] is True)
+    if phone:
+        until(lambda: (c := req("context")) and c.get("character") and c, 30)
+        time.sleep(1.5)
+        expect("device: a phone, touch on", lambda: req("device", {"action": "get"}),
+               lambda r: r["simulated"] and r["form"] == "Phone" and r["touch"] is True)
+        expect("touch tap on the menu's button: a real touch, the button takes it", lambda: req("touch", {
+            "action": "tap", "ui": "Menu.RingButton"}), lambda r: r["as"] == "touch")
+        before = req("pose")
+        req("touch", {"action": "down", "screen_x": -0.7, "screen_y": -0.6})
+        req("touch", {"action": "move", "screen_x": -0.7, "screen_y": -0.25, "seconds": 0.15})
+        time.sleep(1.0)
+        req("touch", {"action": "up"})
+        after = req("pose")
+        moved = ((after["at"]["X"] - before["at"]["X"]) ** 2 + (after["at"]["Y"] - before["at"]["Y"]) ** 2) ** 0.5
+        check("a finger on Roblox's thumbstick walks the player", moved > 200, f"moved {moved:.0f} cm")
+        expect("back to the desktop", lambda: req("session", {"action": "restart", "device": "desktop"}, timeout=120),
+               lambda r: r["running"] is True)
 
     # restart and stop
     t0 = time.time()

@@ -1,18 +1,22 @@
 --!strict
 -- The play session's client (the player's DataModel): what the player sees and does. Answers view, screen, ui, ui_act,
--- pointer, key, input, move, watch, find, transforms, pose, movement, context, ping and rc on the client's own
--- instances (the editor sends rc to the server unless the path is the client's: Router.luau). Runs the client's
--- detectors. Holds are leased as in every plugin: a held key not renewed within its lease is let go.
+-- pointer, touch, key, input, move, watch, find, transforms, pose, movement, device, context, ping, capture, record and
+-- rc on the client's own instances (the editor sends rc to the server unless the path is the client's: Editor.route).
+-- Runs the client's detectors. Holds are leased as in every plugin: a held key not renewed within its lease is let go.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local Detectors = require(script.Parent.Detectors)
+local Device = require(script.Parent.Device)
 local Fallback = require(script.Parent.Fallback)
 local Frame = require(script.Parent.Frame)
 local Host = require(script.Parent.Host)
 local Json = require(script.Parent.Json)
 local Keys = require(script.Parent.Keys)
+local Media = require(script.Parent.Media)
 local Modules = require(script.Parent.Modules)
+local Pad = require(script.Parent.Pad)
 local Paths = require(script.Parent.Paths)
 local Rc = require(script.Parent.Rc)
 local Sight = require(script.Parent.Sight)
@@ -25,6 +29,7 @@ local KEY_TAP_SECONDS = 0.05
 local KEY_TAP_FRAMES = 2
 
 function Client.start(plugin: Plugin)
+	Device.init(plugin)
 	local held: { [string]: any } = {}
 	local unreachedAt = -1e9 -- when a key last didn't reach the game (told at most every 15 s)
 	local lease = 1.0
@@ -46,11 +51,14 @@ function Client.start(plugin: Plugin)
 		table.clear(held)
 		Keys.releaseTurn()
 		Fallback.releaseAll()
+		Pad.releaseAll()
+		Ui.releaseTouch()
 	end
 
-	-- A key sent down that the game didn't get: Studio's game view isn't the focused window (Roblox drops keyboard input
-	-- then). From then on the keys Roblox's own controls read go in as those controls put them (Fallback.luau) until a
-	-- key reaches the game again. Told to the brain as a finding (the run's report says it) and in Studio's output.
+	-- A key sent down that the game didn't get. Studio's virtual input reaches the game whether or not Studio's game
+	-- view is the focused window, so this is a game view that takes no input at all; then the keys Roblox's own controls
+	-- read go in as those controls put them (Fallback.luau) until a key reaches the game again. Told to the brain as a
+	-- finding (the run's report says it) and in Studio's output.
 	local unfocused = false
 	local function reached(spec: any): boolean
 		local r = Keys.reached(spec)
@@ -60,10 +68,8 @@ function Client.start(plugin: Plugin)
 			unfocused = true
 			if os.clock() - unreachedAt >= 15 then
 				unreachedAt = os.clock()
-				local text = "The game didn't get the key " .. spec.name .. ": Roblox drops keyboard input while Studio's "
-					.. "game view isn't the focused window. Walking, jumping and prompts go in as Roblox's own controls "
-					.. "take them meanwhile; other keys don't. Click into the game view and leave Studio in front while "
-					.. "Autopilot plays."
+				local text = "The game didn't get the key " .. spec.name .. " from Studio's virtual input. Walking, "
+					.. "jumping and prompts go in as Roblox's own controls take them meanwhile; other keys don't."
 				warn("[Autopilot] " .. text)
 				if host then
 					host:emit({ kind = "finding", t = host:t(), finding = { detector = "no_input", severity = "warning",
@@ -92,6 +98,24 @@ function Client.start(plugin: Plugin)
 			keys = { "MouseX", "MouseY", "RightMouseButton" }, digital = false })
 		table.insert(out, { name = "Zoom (Roblox's default camera)", action = "", keys = { "MouseScrollUp",
 			"MouseScrollDown", "I", "O" }, digital = true })
+		table.insert(out, { name = "Move and turn with a gamepad (Roblox's default controls)", action = "",
+			keys = { "Gamepad_LeftX", "Gamepad_LeftY", "Gamepad_RightX", "Gamepad_RightY" }, digital = false })
+		table.insert(out, { name = "Jump with a gamepad (Roblox's default controls)", action = "",
+			keys = { "Gamepad_FaceButton_Bottom" }, digital = true })
+		return out
+	end
+
+	-- The play session's players, by number (1 is the player Autopilot plays as; 2, 3... the others of a multiplayer
+	-- test, each played from its own client: requests with `player`)
+	local function players(): { any }
+		local out = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			table.insert(out, { player = Paths.playerIndex(p), name = p.Name, path = Paths.of(p),
+				character = Paths.of(p.Character), you = p == Players.LocalPlayer })
+		end
+		table.sort(out, function(a, b)
+			return a.player < b.player
+		end)
 		return out
 	end
 
@@ -99,16 +123,47 @@ function Client.start(plugin: Plugin)
 		local char = World.character()
 		local cam = workspace.CurrentCamera
 		local lp = Players.LocalPlayer
-		return { world = "/Workspace", scene = game.Name, character = Paths.of(char), controller = Paths.of(lp),
+		return { you = if lp then Paths.playerIndex(lp) else 1, players = players(), world = "/Workspace", scene = game.Name, character = Paths.of(char), controller = Paths.of(lp),
 			input_subsystem = "", camera_manager = Paths.of(cam), camera = Paths.of(cam), dimension = "3d",
 			game_name = game.Name, host = "editor", engine = "roblox", session_running = true, paused = false,
 			game_time = Frame.r2(World.gameTime()), project_dir = "", controls = controls(),
 			player = Paths.of(lp), humanoid = Paths.of(World.humanoid()),
 			camera_type = if cam then cam.CameraType.Name else "",
-			mouse_behavior = game:GetService("UserInputService").MouseBehavior.Name,
+			mouse_behavior = UserInputService.MouseBehavior.Name,
 			place_id = game.PlaceId, universe_id = game.GameId,
-			-- (whether the keys reach the game: not while Studio's game view isn't the focused window)
-			input = { keys_reach = not unfocused, fallback = "movement keys, SpaceBar and ProximityPrompt keys" } }
+			-- (what the player's input is: the keys reach the game, focused or not; the device Studio simulates)
+			input = { keys_reach = not unfocused, needs_focus = false, keyboard = true, mouse = true,
+				gamepad = "buttons as KeyCodes; sticks and triggers as Roblox's gamepad controls take them",
+				touch = UserInputService.TouchEnabled, pad = Pad.state() },
+			device = Device.describe() }
+	end
+
+	-- A stick's axis or an analog trigger (Pad.luau): a hold keeps its value (renewed as any hold, or for `seconds`), a
+	-- release puts it back to rest, a press pushes it for a moment (0.15 s).
+	local function padOp(name: string, spec: any, mode: string, value: number, args: any): (boolean, any, number?)
+		if mode == "release" then
+			held[name] = nil
+			Pad.set(spec, 0)
+			return true, Json.object()
+		end
+		local ok, why = Pad.set(spec, value)
+		if not ok then
+			return false, why, 409
+		end
+		if mode == "hold" then
+			local h = held[name] or { spec = spec }
+			held[name] = h
+			h.value = value
+			h.renewed = os.clock()
+			local seconds = tonumber(args.seconds) or 0
+			h["until"] = if seconds > 0 then World.gameTime() + seconds else 0
+			return true, Json.object()
+		end
+		task.wait(0.15)
+		if not held[name] then
+			Pad.set(spec, 0)
+		end
+		return true, Json.object()
 	end
 
 	local function keyOp(args: any, _id: any): (boolean, any, number?)
@@ -123,13 +178,12 @@ function Client.start(plugin: Plugin)
 		local name = tostring(args.key or "")
 		local spec = Keys.spec(name)
 		if spec == nil then
-			if string.sub(name, 1, 8) == "Gamepad_" then
-				return false, "Unknown key " .. name .. ": Roblox Studio takes no gamepad from a plugin; use the keyboard "
-					.. "and mouse keys the game binds"
-			end
 			return false, "Unknown key " .. name
 		end
 		local value = tonumber(args.value) or 1
+		if Keys.isPad(spec) then
+			return padOp(name, spec, mode, value, args)
+		end
 		local axis = Keys.isAxis(spec)
 		if mode == "release" then
 			local h = held[name]
@@ -147,16 +201,30 @@ function Client.start(plugin: Plugin)
 		if mode == "hold" then
 			if not held[name] then
 				local h = { spec = spec }
+				if not axis then
+					local sent, why = Keys.send(spec, true, value)
+					if not sent then
+						return false, why, 409
+					end
+				end
 				held[name] = h
 				if not axis then
-					Keys.send(spec, true, value)
 					if unfocused and Fallback.handles(spec) then
 						h.fallback = true
 						Fallback.down(spec)
 					end
 					task.spawn(function()
-						frames(2)
-						if held[name] == h and not h.fallback and not reached(spec) and Fallback.handles(spec) then
+						-- (a few frames for the key to show: a multiplayer test's client, its own process, can be slow)
+						local seen = false
+						for _ = 1, 8 do
+							RunService.Heartbeat:Wait()
+							if held[name] ~= h or Keys.reached(spec) ~= false then
+								seen = true
+								break
+							end
+						end
+						if held[name] == h and not h.fallback and not seen and not reached(spec)
+							and Fallback.handles(spec) then
 							h.fallback = true
 							Fallback.down(spec)
 						end
@@ -176,13 +244,21 @@ function Client.start(plugin: Plugin)
 			Keys.send(spec, true, value)
 			return true, Json.object()
 		end
-		Keys.send(spec, true, value)
+		local sent, why = Keys.send(spec, true, value)
+		if not sent then
+			return false, why, 409
+		end
 		local started = os.clock()
 		frames(KEY_TAP_FRAMES)
-		local got = reached(spec)
-		while os.clock() - started < KEY_TAP_SECONDS do
+		-- (down at least KEY_TAP_SECONDS, and until the game shows it, a few frames at most)
+		local seen = Keys.reached(spec) ~= false
+		local waited = KEY_TAP_FRAMES
+		while os.clock() - started < KEY_TAP_SECONDS or (not seen and waited < 8) do
 			RunService.Heartbeat:Wait()
+			waited += 1
+			seen = seen or Keys.reached(spec) ~= false
 		end
+		local got = seen or reached(spec)
 		if not held[name] then
 			Keys.send(spec, false)
 		end
@@ -201,7 +277,9 @@ function Client.start(plugin: Plugin)
 			local releaseAt = h["until"] or 0
 			local expired = if releaseAt > 0 then t >= releaseAt else (now - h.renewed > lease)
 			if expired then
-				if not Keys.isAxis(h.spec) then
+				if Keys.isPad(h.spec) then
+					Pad.set(h.spec, 0)
+				elseif not Keys.isAxis(h.spec) then
 					Keys.send(h.spec, false)
 				end
 				if h.fallback then
@@ -222,7 +300,8 @@ function Client.start(plugin: Plugin)
 			return false, "No input action named " .. action
 		end
 		local mode = tostring(args.mode or "press")
-		return keyOp({ key = action, mode = if mode == "hold" then "hold" else mode, lease = 10 }, id)
+		return keyOp({ key = action, mode = if mode == "hold" then "hold" else mode, seconds = args.seconds,
+			value = args.value }, id)
 	end
 
 	-- `move`: walk the player in a kit-frame direction for `seconds`, as Roblox's own controls do with an analog stick:
@@ -330,6 +409,20 @@ function Client.start(plugin: Plugin)
 		pointer = function(args)
 			return Ui.pointer(args)
 		end,
+		touch = function(args)
+			return Ui.touch(args)
+		end,
+		-- `device`: the device Studio simulates (Device.luau), switched while the game plays
+		device = function(args)
+			return Device.handle(args)
+		end,
+		-- `capture`, `record`: the game's picture, when Studio gives the plugin one (Media.luau)
+		capture = function(args)
+			return Media.capture(args)
+		end,
+		record = function(args, _id, h)
+			return Media.record(args, h)
+		end,
 		find = function(args)
 			return true, World.find(args)
 		end,
@@ -375,9 +468,17 @@ function Client.start(plugin: Plugin)
 		end,
 	}
 
-	host = Host.new(plugin, "client", ops)
+	-- (player 1's client answers as "client", the others of a multiplayer test as "client2", "client3"...)
+	local me = Players.LocalPlayer
+	while me == nil do
+		task.wait(0.1)
+		me = Players.LocalPlayer
+	end
+	local index = Paths.playerIndex(me)
+	host = Host.new(plugin, Host.clientSide(index), ops, index)
 	host.onAttach = function(frame)
 		Modules.install()
+		task.spawn(Keys.toVirtual, Vector2.zero) -- (where virtual input's points are, measured now: not in a first turn)
 		if detectors == nil then
 			detectors = Detectors.new(function(e)
 				host:emit(e)
@@ -391,6 +492,7 @@ function Client.start(plugin: Plugin)
 	end
 	host.onDetach = function()
 		releaseAll()
+		Media.stop()
 		Modules.remove()
 		if detectors then
 			detectors:stop()

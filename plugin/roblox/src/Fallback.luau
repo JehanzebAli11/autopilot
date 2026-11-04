@@ -1,10 +1,10 @@
 --!strict
--- Keys for a game view without focus. Roblox drops keyboard input while Studio's game view isn't the focused window
--- (the mouse still goes in). The keys Roblox's own controls read then go in the way those controls would put them, so
--- the player still walks, jumps and uses prompts: the movement keys (W/A/S/D and the arrows) as the player's Move,
--- relative to the camera (what the default ControlModule does with them), SpaceBar as the Humanoid's Jump, and a
--- ProximityPrompt's key as that prompt's input (InputHoldBegin / InputHoldEnd on the nearest prompt in reach that the
--- key triggers). Any other key has no way in without focus.
+-- Keys for a game view that takes no virtual input. Studio's virtual input reaches the game whether or not its game
+-- view is the focused window, so this is a safety net, used only after a key sent down didn't reach the game
+-- (Client.luau): the keys Roblox's own controls read then go in the way those controls would put them, so the player
+-- still walks, jumps and uses prompts: the movement keys (W/A/S/D and the arrows) as the player's Move, relative to the
+-- camera (what the default ControlModule does with them), SpaceBar as the Humanoid's Jump, and a ProximityPrompt's key
+-- as that prompt's input (InputHoldBegin / InputHoldEnd on the nearest prompt in reach that the key triggers).
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 

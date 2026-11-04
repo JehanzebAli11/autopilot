@@ -3,20 +3,32 @@
 -- to the agent service, as Godot's editor does, because a play session's client and server are other DataModels that
 -- come and go with each Play:
 --  - `session` start / stop / restart play the place (StudioTestService:ExecutePlayModeAsync, as Studio's Play button
---    does: a server and one player's client) and end it (the server's StudioTestService:EndTest);
+--    does: a server and one player's client) and end it (the server's StudioTestService:EndTest); with `players` above
+--    1, a multiplayer test as Studio's Server & Clients test plays it (ExecuteMultiplayerTestAsync: the server and each
+--    player's client are Studio processes of their own, each with the plugin);
+--  - the players: Autopilot plays player 1 (its client answers as "client"); a request with `player` n goes to player
+--    n's client ("client<n>": its view, its keys...), and its rc's LocalPlayer, Character and Humanoid are player n's:
+--    one brain with several bodies (kit: game.player(n));
 --  - `levels`, `codex_manifest` and `codex_read` are answered here, from the place open in Studio (Codex.luau);
 --  - every other request goes to a side of the play session over the pipe (Host.luau): `rc` to the server unless its
 --    path is the client's (the player's PlayerGui, PlayerScripts, camera; Route below), the player's ops (view, key,
 --    move, ui...) to the client; their answers and events come back the same way and go on to the brain;
 --  - with no play session, `context` and `ping` are answered here (session_running false), the rest get 409;
---  - `record` and `capture` get 409: Studio gives a plugin no picture of the game.
+--  - `device` switches the device Studio simulates (Device.luau: a phone or tablet makes the game a touch device) here
+--    with no play session, in its client during one; a session's start takes `device` and `orientation` too, and the
+--    user's own device comes back when the run ends;
+--  - `record` and `capture` go to the client when Studio gives the plugin pictures (StudioCaptureService: Media.luau,
+--    the hello then says "media"; a recording asked for between play sessions starts with the next one); else they get
+--    409, and the agent service answers them itself from Studio's MCP server (autopilot/studio_mcp.py).
 -- The dock (Dock.luau) drives runs through it (start, stop, steer, clear_memory, the account) and shows what comes.
 local RunService = game:GetService("RunService")
 local StudioTestService = game:GetService("StudioTestService")
 
 local Codex = require(script.Parent.Codex)
+local Device = require(script.Parent.Device)
 local Json = require(script.Parent.Json)
 local Link = require(script.Parent.Link)
+local Media = require(script.Parent.Media)
 local Paths = require(script.Parent.Paths)
 local Settings = require(script.Parent.Settings)
 
@@ -25,7 +37,9 @@ Editor.__index = Editor
 
 Editor.VERSION = "1.0.0"
 local SESSION_TIMEOUT = 60
-local PLAY_SIDES = { "client", "server" }
+local PLAYERS_TIMEOUT = 40 -- seconds for a multiplayer test's other players to join (then asked for again, once)
+local MAX_PLAYERS = 7 -- (the pipe takes 8 parts: the server and 7 clients)
+local Host = require(script.Parent.Host)
 
 -- Which side of the play session an rc request goes to: "server", "client", or "server" with "client" if the server
 -- has no such instance (fallback). A path's "server:" / "client:" says so itself.
@@ -72,6 +86,8 @@ function Editor.new(plugin: Plugin)
 	self.starting = false -- we asked Studio to play and it hasn't ended
 	self.forwarded = {} -- brain request id -> when it went to the play session
 	self.detectorConfig = {}
+	self.media = false -- Studio gives the plugin pictures (StudioCaptureService), known a moment after the start
+	self.recordArgs = nil -- a recording the brain asked for (started in each play session's client)
 	self.listeners = {} -- event name -> {fn}
 	self.alive = true
 	self.connection = 0
@@ -87,6 +103,10 @@ function Editor.new(plugin: Plugin)
 	end
 	self.heartbeat = RunService.Heartbeat:Connect(function()
 		self:_tick()
+	end)
+	Device.init(plugin)
+	task.spawn(function()
+		self.media = Media.available() -- (may ask the user once: not in the hello's way; a reconnect says it)
 	end)
 	return self
 end
@@ -151,9 +171,14 @@ end
 function Editor:_hello()
 	local h: any = { type = "hello", protocol = Link.PROTOCOL, plugin_version = Editor.VERSION, engine = "roblox",
 		engine_version = version(), project = self:projectName(), host = "editor", inspect = true,
-		-- `levels` and `timed_hold`; no `media`: a plugin gets no picture of the game in Studio
-		features = { "levels", "timed_hold" }, share = self.privacyReady and Settings.get(self.plugin, "share") ~= false,
+		-- `levels`, `timed_hold`, `touch`, `gamepad`, `device`, `players` (multiplayer); `media` when Studio gives
+		-- the plugin pictures
+		features = { "levels", "timed_hold", "touch", "gamepad", "device", "players" },
+		share = self.privacyReady and Settings.get(self.plugin, "share") ~= false,
 		place_id = game.PlaceId, universe_id = game.GameId, transport = self.link.transport }
+	if self.media then
+		table.insert(h.features, "media")
+	end
 	local pid = self:projectId()
 	if pid then
 		h.project_id = pid
@@ -182,6 +207,8 @@ end
 
 function Editor:_onClosed(was: boolean)
 	self.privacyReady = false
+	self.recordArgs = nil
+	self:_restoreDevice()
 	self.runActive = false
 	self:_fire("run", false)
 	self:_endPipe()
@@ -344,6 +371,7 @@ function Editor:_onBrainFrame(frame: any)
 		self:_fire("run", false)
 		self:_fire("result", result, frame.files)
 		self:status("Run finished")
+		self:_restoreDevice()
 	elseif kind == "memory_state" then
 		self.memory = { known = true, runs = tonumber(frame.runs) or 0, notes = frame.notes == true, lib = frame.lib == true }
 		self:_fire("memory")
@@ -393,6 +421,7 @@ end
 function Editor:_editorContext(): any
 	return { world = "", scene = game.Name, character = "", controller = "", input_subsystem = "", camera_manager = "",
 		camera = "", game_name = game.Name, host = "editor", engine = "roblox", session_running = false, paused = false,
+		players = {}, you = 1,
 		game_time = 0, project_dir = "", controls = {}, place_id = game.PlaceId, universe_id = game.GameId }
 end
 
@@ -435,19 +464,45 @@ function Editor:_onRequest(frame: any)
 		end)
 		return
 	elseif op == "record" then
-		if tostring(args.action or "") == "stop" then
-			self:_respond(id, { recording = false, frames = 0 })
+		local stop = tostring(args.action or "") == "stop"
+		if not self.media then
+			if stop then
+				self:_respond(id, { recording = false, frames = 0 })
+			else
+				self:_respondError(id, "no picture: this Studio gives a plugin no picture of the game", 409)
+			end
+			return
+		end
+		self.recordArgs = if stop then nil else args
+		if self.playing then
+			self:_forward(frame, "client", false)
 		else
-			self:_respondError(id, "no picture: Roblox Studio gives a plugin no picture of the game", 409)
+			self:_respond(id, if stop then { recording = false, frames = 0 } else { recording = true, waiting = true })
 		end
 		return
 	elseif op == "capture" then
-		self:_respondError(id, "no picture: Roblox Studio gives a plugin no picture of the game", 409)
+		if not self.media then
+			self:_respondError(id, "no picture: this Studio gives a plugin no picture of the game", 409)
+		elseif not self.playing then
+			self:_respondError(id, "no picture: no game is running (start one with session start)", 409)
+		else
+			self:_forward(frame, "client", false)
+		end
+		return
+	elseif op == "device" and not self.playing then
+		task.spawn(function()
+			local ok, a, b = Device.handle(args)
+			if ok then
+				self:_respond(id, a)
+			else
+				self:_respondError(id, tostring(a), b)
+			end
+		end)
 		return
 	elseif op == "detectors" then
 		self.detectorConfig = args
 		if self.playing then
-			for _, side in ipairs(PLAY_SIDES) do
+			for side in pairs(self.sides) do
 				self:_pipeSend({ to = side, type = "request", id = "detectors-" .. side, op = "detectors", args = args })
 			end
 		end
@@ -466,6 +521,13 @@ function Editor:_onRequest(frame: any)
 		end
 		return
 	end
+	-- (player n's client: the player a request is for, 1 when it says none)
+	local n = math.floor(tonumber(args.player) or 1)
+	local client = Host.clientSide(n)
+	if n > 1 and self.sides[client] == nil then
+		self:_respondError(id, "No player " .. tostring(n) .. " in the game: " .. self:_playersSaid(), 404)
+		return
+	end
 	if op == "rc" then
 		local body = if type(args.body) == "table" then args.body else {}
 		if tostring(args.verb or "") == "probe" then
@@ -473,14 +535,30 @@ function Editor:_onRequest(frame: any)
 			return
 		end
 		local side, fallback = Editor.route(tostring(body.objectPath or ""))
-		self:_forward(frame, side, fallback)
+		self:_forward(frame, if side == "client" then client else side, fallback)
 	elseif op == "pause" then
 		-- (each side runs its own simulation: the server's pause leaves the player's character moving)
-		self:_pipeSend({ to = "server", type = "request", id = "pause-server", op = "pause", args = args })
+		for side in pairs(self.sides) do
+			if side ~= "client" then
+				self:_pipeSend({ to = side, type = "request", id = "pause-" .. side, op = "pause", args = args })
+			end
+		end
 		self:_forward(frame, "client", false)
 	else
-		self:_forward(frame, "client", false)
+		self:_forward(frame, client, false)
 	end
+end
+
+-- The players there are, said for an error.
+function Editor:_playersSaid(): string
+	local n = 0
+	for side in pairs(self.sides) do
+		if string.sub(side, 1, 6) == "client" then
+			n += 1
+		end
+	end
+	return string.format("%d player%s (start a session with \"players\": %d for more)", n, if n == 1 then "" else "s",
+		n + 1)
 end
 
 -- --- the play session ----------------------------------------------------------------------------------------------
@@ -497,7 +575,21 @@ function Editor:_waitFor(cond: () -> boolean, seconds: number): boolean
 end
 
 -- Play the place, as Studio's Play button does; returns once the client is attached (or why not).
-function Editor:play(): (boolean, string?)
+-- How many players' clients are attached.
+function Editor:_clientsHere(): number
+	local n = 0
+	for side, s in pairs(self.sides) do
+		if string.sub(side, 1, 6) == "client" and s.ready then
+			n += 1
+		end
+	end
+	return n
+end
+
+-- Play the place, as Studio's Play button does (one player) or its Server & Clients test (players > 1); returns once
+-- player 1's client is attached, and the others' (or why not).
+function Editor:play(players: number?): (boolean, string?)
+	local want = math.clamp(math.floor(players or 1), 1, MAX_PLAYERS)
 	if self.playing then
 		return true, nil
 	end
@@ -505,8 +597,14 @@ function Editor:play(): (boolean, string?)
 	if not self.starting then
 		self.starting = true
 		task.spawn(function()
+			local pipe = Settings.pipe(self.plugin)
+			local testArgs: any = { autopilot = if pipe then { url = pipe.url, key = pipe.key, http_url = pipe.http_url,
+				players = want } else nil }
 			local ok, err = pcall(function()
-				return StudioTestService:ExecutePlayModeAsync({ autopilot = Settings.pipe(self.plugin) })
+				if want > 1 then
+					return StudioTestService:ExecuteMultiplayerTestAsync(want, testArgs)
+				end
+				return StudioTestService:ExecutePlayModeAsync(testArgs)
 			end)
 			self.starting = false
 			if not ok then
@@ -531,6 +629,23 @@ function Editor:play(): (boolean, string?)
 	if not ok then
 		return false, "Timed out waiting for the play session"
 	end
+	if want > 1 then
+		-- (Studio starts each player's client in a process of its own, one after another: a client that doesn't come
+		-- is asked for again, once, through the server)
+		local all = self:_waitFor(function()
+			return self:_clientsHere() >= want
+		end, PLAYERS_TIMEOUT)
+		if not all and self.playing then
+			self:_pipeSend({ to = "server", type = "request", id = "add-players", op = "add_players",
+				args = { count = want - self:_clientsHere() } })
+			all = self:_waitFor(function()
+				return self:_clientsHere() >= want
+			end, PLAYERS_TIMEOUT)
+		end
+		if not all then
+			return false, string.format("Only %d of %d players joined the multiplayer test", self:_clientsHere(), want)
+		end
+	end
 	return true, nil
 end
 
@@ -549,6 +664,31 @@ function Editor:stopPlaying(): (boolean, string?)
 	return true, nil
 end
 
+-- The device a session starts on (its `device` and `orientation`): set while no game plays. Returns why not, or nil.
+function Editor:_startDevice(args: any): string?
+	if args.device == nil and args.orientation == nil then
+		return nil
+	end
+	local ok, why = Device.set(tostring(args.device or Device.describe().id),
+		if args.orientation then tostring(args.orientation) else nil)
+	return if ok then nil else tostring(why)
+end
+
+-- The user's own device back (Device.restore), by the client while a game plays.
+function Editor:_restoreDevice()
+	if Settings.get(self.plugin, "device_before") == nil then
+		return
+	end
+	if self.playing and self.link.connected then
+		self:_pipeSend({ to = "client", type = "request", id = "device-restore", op = "device",
+			args = { action = "restore" } })
+	elseif self.playing then
+		self.restorePending = true -- (no way to the client now: once its play session ends)
+	else
+		task.spawn(Device.restore)
+	end
+end
+
 function Editor:_session(id: any, args: any)
 	local action = tostring(args.action or "status")
 	local map = tostring(args.map or "")
@@ -556,10 +696,28 @@ function Editor:_session(id: any, args: any)
 		self:_respondError(id, "No level " .. map .. ": a Roblox place is one level (" .. game.Name .. ")")
 		return
 	end
+	if args.players ~= nil then
+		self.players = math.clamp(math.floor(tonumber(args.players) or 1), 1, MAX_PLAYERS)
+	end
+	local players = self.players or 1
+	if players > 1 and args.device ~= nil and tostring(args.device) ~= "desktop" then
+		self:_respondError(id, "A device is for a game of one player (a multiplayer test's players are Studio "
+			.. "windows of their own)", 400)
+		return
+	end
+	if action == "start" and self.playing and (args.device ~= nil or args.orientation ~= nil
+		or (args.players ~= nil and players ~= self:_clientsHere())) then
+		action = "restart" -- (a device, or the players, are set between play sessions: the game starts over)
+	end
 	if action == "start" then
-		local ok, err = self:play()
+		local why = self:_startDevice(args)
+		if why then
+			self:_respondError(id, why, 409)
+			return
+		end
+		local ok, err = self:play(players)
 		if ok then
-			self:_respond(id, { running = true, scene = game.Name })
+			self:_respond(id, { running = true, scene = game.Name, players = self:_clientsHere() })
 		else
 			self:_respondError(id, err or "couldn't play", 500)
 		end
@@ -574,19 +732,27 @@ function Editor:_session(id: any, args: any)
 		-- As Studio's Stop then Play: a fresh server and client (the game's scripts start over)
 		local ok, err = self:stopPlaying()
 		if ok then
-			ok, err = self:play()
+			err = self:_startDevice(args)
+			ok = err == nil
 		end
 		if ok then
-			self:_respond(id, { running = true, scene = game.Name })
+			ok, err = self:play(players)
+		end
+		if ok then
+			self:_respond(id, { running = true, scene = game.Name, players = self:_clientsHere() })
 		else
 			self:_respondError(id, err or "couldn't restart", 500)
 		end
 	else
-		self:_respond(id, { running = self.playing })
+		self:_respond(id, { running = self.playing, players = self:_clientsHere() })
 	end
 end
 
 function Editor:_playEnded()
+	if self.restorePending then
+		self.restorePending = false
+		task.spawn(Device.restore)
+	end
 	if not self.playing and not self.sides.client then
 		return
 	end
@@ -629,6 +795,11 @@ function Editor:_endPipe()
 		self.sides = {}
 		self:_fire("playing", false)
 	end
+	if self.restorePending then
+		-- (the connection went with the game playing: tried from here, else the next run's end puts it back)
+		self.restorePending = false
+		task.spawn(Device.restore)
+	end
 end
 
 function Editor:_pipeSend(frame: any)
@@ -653,6 +824,11 @@ function Editor:_onPipeFrame(frame: any)
 		self:_pipeSend({ to = side, type = "attach", detectors = self.detectorConfig })
 	elseif kind == "ready" then
 		self.sides[side] = { ready = true, seen = now() }
+		if side == "client" and self.recordArgs then
+			-- (the brain's recording goes on in this play session)
+			self:_pipeSend({ to = "client", type = "request", id = "record-resume", op = "record",
+				args = self.recordArgs })
+		end
 		if side == "client" and not self.playing then
 			self.playing = true
 			if self:connected() then

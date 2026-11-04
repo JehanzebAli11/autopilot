@@ -146,9 +146,55 @@ local function service(name: string): Instance?
 	return if ok then s else nil
 end
 
+-- A player's number in the play session: Studio's test players are Player1, Player2... (UserId -1, -2...); the one
+-- player of a play session that isn't a multiplayer test (the user's own account) is 1.
+function Paths.playerIndex(p: Player): number
+	return if p.UserId < 0 then -p.UserId else 1
+end
+
+-- Player n (1 the player Autopilot plays as), or nil.
+function Paths.player(n: number): Player?
+	for _, p in ipairs(Players:GetPlayers()) do
+		if Paths.playerIndex(p) == n then
+			return p
+		end
+	end
+	return if n <= 1 then (Players.LocalPlayer or Players:GetPlayers()[1]) else nil
+end
+
+-- A path whose first part is a short name (LocalPlayer, Character, Humanoid) as player n's own: on the server, which
+-- has every player, a request for another player than the first names that player's things.
+function Paths.forPlayer(path: string, n: number): string
+	if n <= 1 then
+		return path
+	end
+	local p = Paths.player(n)
+	if p == nil then
+		return path
+	end
+	local prefix, rest = string.match(path, "^(%a+:)(.*)$")
+	if prefix ~= "server:" and prefix ~= "client:" then
+		prefix, rest = "", path
+	end
+	local head, tail = string.match(rest :: string, "^/?([^/%.]+)(.*)$")
+	if head == nil then
+		return path
+	end
+	local char = p.Character
+	local target: Instance? = if head == "LocalPlayer" then p elseif head == "Character" then char
+		elseif head == "Humanoid" then (char and char:FindFirstChildOfClass("Humanoid")) else nil
+	if target == nil then
+		return path
+	end
+	if string.sub(tail, 1, 1) == "." then
+		tail = (string.gsub(tail, "%.", "/"))
+	end
+	return (prefix :: string) .. Paths.of(target) .. tail
+end
+
 -- The local player's own things by a short name (LocalPlayer, Character, Humanoid, Camera), or nil.
 local function shortcut(name: string): Instance?
-	local lp = Players.LocalPlayer or Players:GetPlayers()[1]
+	local lp = Players.LocalPlayer or Paths.player(1)
 	if name == "LocalPlayer" then
 		return lp
 	elseif name == "Character" then

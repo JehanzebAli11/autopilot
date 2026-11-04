@@ -22,10 +22,35 @@ Host.__index = Host
 
 export type Op = (any, any, any) -> (boolean, any, number?)
 
-function Host.new(plugin: Plugin, side: string, ops: { [string]: Op })
+-- The side a play session's client answers as: "client" for player 1 (the player Autopilot plays as), "client2",
+-- "client3"... for the others of a multiplayer test (Paths.playerIndex).
+function Host.clientSide(n: number?): string
+	return if (n or 1) <= 1 then "client" else "client" .. tostring(n)
+end
+
+-- Where the editor's pipe is: the plugin's settings (every DataModel of Studio's process reads them), else the play
+-- session's test arguments (a multiplayer test's server and clients are Studio processes of their own:
+-- StudioTestService:GetTestArgs()).
+local function pipeOf(plugin: Plugin): any
+	local p = Settings.pipe(plugin)
+	if p then
+		return p
+	end
+	local ok, args = pcall(function()
+		return game:GetService("StudioTestService"):GetTestArgs()
+	end)
+	local a = if ok and type(args) == "table" then args.autopilot else nil
+	if type(a) == "table" and type(a.url) == "string" and type(a.key) == "string" and a.key ~= "" then
+		return a
+	end
+	return nil
+end
+
+function Host.new(plugin: Plugin, side: string, ops: { [string]: Op }, player: number?)
 	local self = setmetatable({}, Host) :: any
 	self.plugin = plugin
 	self.side = side
+	self.player = player or 1 -- (a client's player: 1, or 2, 3... in a multiplayer test)
 	self.ops = ops
 	self.events = {}
 	self.attached = false
@@ -58,6 +83,9 @@ end
 
 function Host:emit(event: any)
 	if self.attached then
+		if self.player > 1 then
+			event.player = self.player -- (another player's client: what happened to whom)
+		end
 		table.insert(self.events, event)
 	end
 end
@@ -102,8 +130,9 @@ function Host:_handle(frame: any)
 		local ok, a, b, c = pcall(fn, args, frame.id, self)
 		self:flush() -- (events first: a change the answer depends on is told before it)
 		if ok and a == false and frame.fallback and string.find(tostring(b), "does not exist", 1, true) then
-			-- (not on this side: an instance only the client has; the client answers)
-			self:send({ to = "client", type = "request", id = frame.id, op = frame.op, args = frame.args })
+			-- (not on this side: an instance only the client has; the request's player's client answers)
+			local n = if type(frame.args) == "table" then tonumber(frame.args.player) else nil
+			self:send({ to = Host.clientSide(n), type = "request", id = frame.id, op = frame.op, args = frame.args })
 			return
 		end
 		if not ok then
@@ -151,7 +180,7 @@ end
 function Host:_join()
 	task.spawn(function()
 		while self.alive do
-			local pipe = Settings.pipe(self.plugin)
+			local pipe = pipeOf(self.plugin)
 			local key = if pipe then tostring(pipe.url) .. "#" .. tostring(pipe.key) .. "#" .. tostring(pipe.http_url) else ""
 			if pipe and key ~= self.pipeKey then
 				self.pipeKey = key
