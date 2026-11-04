@@ -330,13 +330,17 @@ end
 -- with it free (Roblox's default camera turns only while the right button is held, locking the mouse meanwhile) the
 -- right button is held for the turn and let go a second after the last one (Keys.tick), as a player drags. Yields a
 -- frame or two when it presses the button. Returns whether the move went in.
-local turning = { held = false, releaseAt = 0 }
+local turning = { held = false, releaseAt = 0, releasedAt = -math.huge }
+local settle: () -> ()
 -- (how long the button stays down after the last turn: a second, so turns that come one after another, as the kit's
 -- calibrate_look and look_at send them, find it down and turn at once, not a few frames late while it is pressed again)
 local TURN_HOLD = 1.0
 
 function Keys.moveMouse(delta: Vector2): boolean
 	local v = vi()
+	if not turning.held then
+		settle() -- (a turn just let go of, e.g. by release_all: the camera frees the mouse before it is taken again)
+	end
 	turning.releaseAt = os.clock() + TURN_HOLD -- (first: the button pressed below isn't let go while it locks the mouse)
 	if UserInputService.MouseBehavior == Enum.MouseBehavior.Default and not rightHeld and not turning.held then
 		turning.held = true -- (first: a caller meanwhile mustn't press the button again)
@@ -358,6 +362,21 @@ function Keys.moveMouse(delta: Vector2): boolean
 	return ok
 end
 
+-- Wait (a few frames at most) while the camera still holds the mouse after the turning button was let go of just now:
+-- a click or a new turn meanwhile would be lost.
+settle = function()
+	if rightHeld or os.clock() - turning.releasedAt > 0.5 then
+		return
+	end
+	for _ = 1, 8 do
+		if UserInputService.MouseBehavior == Enum.MouseBehavior.Default then
+			break
+		end
+		RunService.Heartbeat:Wait()
+	end
+	RunService.Heartbeat:Wait()
+end
+
 -- Let go of the right button held for turning, without waiting (also called on detach: ticking stops when the host
 -- disconnects). Answers whether it sent the button up.
 function Keys.releaseTurn(): boolean
@@ -367,6 +386,7 @@ function Keys.releaseTurn(): boolean
 			pcall(function()
 				vi():SendMouseButton(Keys.toVirtual(Keys.mouseAt()), Enum.UserInputType.MouseButton2, false, 1)
 			end)
+			turning.releasedAt = os.clock()
 			return true
 		end
 	end
@@ -375,17 +395,10 @@ end
 
 -- Let go of the right button held for turning now (before a click or a pointing: while it is down the camera holds
 -- the mouse where it is, and a click would land there), and wait until the camera has let go of the mouse (yields a
--- few frames, only when the button was down).
+-- few frames, only when the button was let go of just now: here, or before without waiting, as release_all does).
 function Keys.endTurn()
-	if Keys.releaseTurn() then
-		for _ = 1, 8 do
-			RunService.Heartbeat:Wait()
-			if UserInputService.MouseBehavior == Enum.MouseBehavior.Default then
-				break
-			end
-		end
-		RunService.Heartbeat:Wait()
-	end
+	Keys.releaseTurn()
+	settle()
 end
 
 -- Once a frame: let go of the right button held for turning once the turns have stopped.
