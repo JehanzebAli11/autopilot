@@ -65,7 +65,7 @@ def run_one(item, args, root):
     os.makedirs(work)
     eng, path = args.engine_of, args.project_path
     project = eng.project_name(path)
-    memory = args.warm or os.path.join(work, "memory")
+    memory = os.path.abspath(args.warm or os.path.join(work, "memory"))  # (see codex.MEMORY)
     pdir = os.path.join(memory, project)
     os.makedirs(pdir, exist_ok=True)
     if args.codex and not os.path.isdir(os.path.join(pdir, "codex")):

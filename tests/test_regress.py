@@ -167,3 +167,17 @@ def test_cli_regress_replays_the_project_regressions(tmp_path, memory, monkeypat
     # none at all: nothing fails
     args = cli.parser().parse_args(["regress", "--regressions", str(tmp_path / "none")])
     assert cli.regress_on(None, "TestPlace", args) == 0
+
+
+def test_a_relative_memory_folder_is_made_absolute(tmp_path):
+    """A relative AUTOPILOT_MEMORY (the bench's, from a relative --out) names the folder from where Autopilot started:
+    the sandboxed child that plays an episode runs inside the project's memory, where the same relative path would
+    land the episode's trace in a second copy of the folder, and its regression would never be saved."""
+    import subprocess
+    import sys
+
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, AUTOPILOT_MEMORY=os.path.join("bench", "memory"), PYTHONPATH=repo)
+    out = subprocess.run([sys.executable, "-c", "from autopilot import codex; print(codex.MEMORY)"], cwd=tmp_path,
+                         env=env, capture_output=True, text=True, check=True).stdout.strip()
+    assert os.path.realpath(out) == os.path.join(os.path.realpath(tmp_path), "bench", "memory")
