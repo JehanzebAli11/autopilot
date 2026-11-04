@@ -83,8 +83,10 @@ the others. Plan for that (see **Limits**).
 **Limits.** Every read and input is one or more MCP round trips. Put all of an observation's reads in one
 `game.batch` / `game.map`: they go to Studio as one `execute_luau` call and are read in the same frame. Separate reads
 pay a round trip each. Inputs land after a delay, and the place can't be paused or stepped frame by frame. Keep the
-harness's `tempo` within what the round trip allows: about one decision per two round trips. With a 150 ms round trip
-that is about 3 decisions a second, so the reflex play of the kit's **Reacting in time** (dodging a hit a fraction of a
-second ahead) is out of reach. Set `tick_hz` no higher than the round trip allows either (`1 / round trip`).
-`tools/roblox_latency.py` measures the round trip. Pictures are stills (`screen_capture`), not video: there is no
+harness's `tempo` within what the round trip allows: about one decision per two round trips. Measured on Studio's
+server, a batched observe takes about 70 ms (p95), so keep `tempo` at about 7 decisions a second or less and `tick_hz`
+at about 14 or less. A key press or release lands in about 35 ms, but a mouse click takes 0.25-0.6 s, and a
+`move` waits until the walk ends. The reflex play of the kit's **Reacting in time** (dodging a hit a fraction of a
+second ahead) is mostly out of reach: plan around hazards rather than reacting to them. `tools/roblox_latency.py`
+measures the round trip on another machine. Pictures are stills (`screen_capture`), not video: there is no
 recording, and how something looks is judged from stills taken at the moments that matter.
