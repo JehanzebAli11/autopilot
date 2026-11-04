@@ -4,12 +4,12 @@ Autopilot plays Roblox places through **Roblox Studio's built-in MCP server**. T
 Studio. A small connector process (`autopilot/engines/roblox.py`) connects to Autopilot as a plugin would and turns the
 protocol's requests into Studio MCP tool calls. This is called **Route A**.
 
-> **Status: not yet verified against a live Studio.** Everything here is built and tested against a stand-in for
-> Studio's MCP server (`FakeStudio` in `autopilot/engines/roblox_mcp.py`, and a simulated place in
-> `tests/robloxsim.py`). Roblox documents the tools' names and purposes but not their exact argument schemas, so the
-> argument names and the input actions' JSON are best guesses, marked `TODO(verify)` in
-> `autopilot/engines/roblox_mcp.py`. Check them with `python tools/roblox_latency.py --tools` (see
-> [Open questions](#open-questions)).
+> **Status: the tools are checked against a live Studio; whole runs are still being tried.** The tool arguments, the
+> input actions' JSON and the tools' answers were read from Studio's own MCP server (RobloxStudio 1.0.0 on macOS,
+> 2026-11: its `tools/list` is in [studio_tools.txt](studio_tools.txt)) and tried in a play session on the test place
+> (see [What a live Studio answered](#what-a-live-studio-answered)). The tests run against a stand-in that follows
+> them (`FakeStudio` in `autopilot/engines/roblox_mcp.py`, and a simulated place in `tests/robloxsim.py`).
+> `python tools/roblox_latency.py --tools` prints the live list again.
 
 ## How it works
 
@@ -21,7 +21,8 @@ Autopilot (the brain) <-- bridge WebSocket, protocol v1 --> Roblox connector <--
 | What Autopilot does | The Studio MCP tool it uses |
 | --- | --- |
 | reads: find, transforms, pose, movement, get, set, call, screen, ui, view | `execute_luau` with the Luau ops of `engines/roblox.luau`; all the reads of one `game.batch` go in **one** call, answered as one JSON string (`HttpService:JSONEncode`) |
-| keys, mouse buttons, camera turns, UI clicks | `user_keyboard_input`, `user_mouse_input` (a right-drag turns the camera) |
+| keys, mouse buttons, the wheel, UI clicks | `user_keyboard_input`, `user_mouse_input` |
+| camera turns (`MouseX`, `MouseY`) | `execute_luau` in the Client: the `turn` op sets the camera's look (Studio's synthetic right-drag doesn't turn it) |
 | `game.request("move", {"to": ...})` | `character_navigation` |
 | start, stop and restart the session | `start_stop_play` (a restart is stop, then start) |
 | the game's errors (`log_error`) | `get_console_output`, read every couple of seconds while the game plays |
@@ -103,25 +104,44 @@ them has been run against Studio yet.
 - **No named input actions.** ContextActionService and UserInputService bindings are pressed by their keys.
 - **Not headless.** Studio must be open, so it can't run in CI.
 
+## What a live Studio answered
+
+Read from Studio's MCP server (RobloxStudio 1.0.0, macOS, 2026-11) on the test place, in Edit and in a play session:
+
+- **Every tool takes and requires `studio_id`**, from `list_roblox_studios`: `{"studios": [{"id", "name"}]}` (the
+  name is the place's file). Studio registers with the server a moment after the server starts (0.25-2 s), so the
+  list can be empty at first: the connector waits for it.
+- **Argument names**: `execute_luau(code, datamodel_type)`, `start_stop_play(is_start)` (a boolean),
+  `script_read(target_file)` (a dot path), `script_grep(query)`, `inspect_instance(path)`,
+  `search_game_tree(datamodel_type, path, instance_type, keywords, max_depth)` (`datamodel_type` required; a path with
+  or without `game.`), `screen_capture(capture_id)` (required), `character_navigation(datamodel_type: "Client", x, y, z
+  | instance_path, speed_multiplier)`.
+- **Inputs**: `{"actions": [...], "datamodel_type": "Client"}`, each step `{"action": ...}`. Keyboard: `keyDown`,
+  `keyUp`, `keyPress` with `key_code` (a KeyCode name: `W`, `Space`, `LeftShift`), `textInput` with `text_inputs`,
+  `wait` with `wait_time_ms`. A key held down stays down between calls until its `keyUp`. Mouse: `moveTo`,
+  `mouseButtonDown`, `mouseButtonUp`, `mouseButtonClick` with `mouse_button` (`left` or `right`: no middle),
+  `scrollUp`, `scrollDown`, `wait`; each step at `x`, `y` (viewport pixels) or an `instance_path`, and a call without a
+  position in it is refused. **A right-drag doesn't turn Roblox's camera** (the camera scripts don't see a synthetic
+  drag), so the connector turns it by setting `workspace.CurrentCamera`'s look in the Client, which the camera
+  scripts carry on from (and `W` then walks the new way). Holding the Left/Right arrow keys turns it too, at about
+  120 degrees a second, but without pitch.
+- **`execute_luau` returns** the chunk's first return value as text (`return 1, "two"` gives `1`; a chunk that only
+  prints gives `nil`, and its prints go to the Output window). An error is the tool's error, with the message. In a
+  play session both `Client` and `Server` answer, and `Players.LocalPlayer` is set in the Client; `Edit` is refused
+  ("Edit datamodel is not available in Play mode").
+- **`get_console_output`**: the Output window as plain lines, without each message's type (a `warn` and a `print` look
+  alike), from before the play session too and including other plugins' messages. Errors are told by their words.
+- **`get_studio_state`**: text lines, `- Current Studio Mode: Edit` (or `Play`), `- Available DataModels: Edit` (or
+  `Client, Server`), `- Focused DataModel in the viewport: ...`.
+- **`character_navigation`** answers `Success` once the walk ends (about 4 studs took 0.4 s).
+- **`screen_capture`** returns a JPEG image item (the viewport, 1219x870 on the machine tried).
+- **`script_read`** numbers each line (`     1→--!strict`); the connector takes the numbers off.
+
 ## Open questions
 
-These need a live Studio (see `TODO(verify)` in `autopilot/engines/roblox_mcp.py`):
-
-- **Argument names** of every tool. The client takes them from each tool's `inputSchema` when the server advertises one,
-  else falls back to guesses (`code` / `datamodel_type` for `execute_luau`; `is_start` for `start_stop_play`, else a
-  `mode` string; `path` for `script_read`...).
-- **The input actions' JSON** for `user_keyboard_input` and `user_mouse_input` (`{"type": "key_down", "key": "W"}`,
-  `{"type": "click", "button": "left", "x", "y"}`...), and whether keys are KeyCode names.
-- **What `execute_luau` returns**: the chunk's return value, its printed output, or both, and in what wrapper.
-  The connector reads JSON out of either, and switches to printing when no returned value comes back.
-- **`get_console_output`'s format**: whether each line says its message type. Errors are told by their words until then.
-- **`get_studio_state`'s format**, which tells whether a play session runs.
-- **`character_navigation`'s target**: an object `{"x","y","z"}` or a list, and whether it waits until the character
-  arrives.
-- **`screen_capture`'s result**: an image content item (PNG or JPEG) is assumed. Roblox's docs also mention a capture id.
-- **Data models during play**: whether `Client` and `Server` both answer `execute_luau` in a Studio play session (Play,
-  not Run), and whether `Players.LocalPlayer` is set in the Client one.
-- **Real latency** of `execute_luau` in play mode, and so the tempo a harness can keep.
+- **Real latency** of a whole observe in play mode, and so the tempo a harness can keep: `tools/roblox_latency.py`
+  measures it (a single `execute_luau` round trip was about 65 ms on the machine tried).
+- **Windows**: everything above was read on macOS. The server's command differs (`mcp.bat`); the tools should not.
 
 ## Future work: Route B
 

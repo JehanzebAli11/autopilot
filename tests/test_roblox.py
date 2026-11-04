@@ -265,12 +265,12 @@ def test_held_keys_walk_and_are_let_go(playing):
     at = game.pose()["at"]
     assert at.x > 100 and abs(at.y) < 1e-6  # (forward)
     kb = [c[2] for c in place.calls if c[0] == mcp.USER_KEYBOARD_INPUT]
-    assert kb[0] == [{"type": "key_down", "key": "W"}] and kb[-1] == [{"type": "key_up", "key": "W"}]
+    assert kb[0] == [{"action": "keyDown", "key_code": "W"}] and kb[-1] == [{"action": "keyUp", "key_code": "W"}]
     assert len(kb) == 2  # (renewals extend the lease: no calls)
     game.press("SpaceBar")
     backend.wait_for_inputs()
     assert [c[2] for c in place.calls if c[0] == mcp.USER_KEYBOARD_INPUT][-1] == [
-        {"type": "key_press", "key": "Space"}]
+        {"action": "keyPress", "key_code": "Space"}]
 
 
 def test_a_hold_not_renewed_is_let_go(playing):
@@ -285,10 +285,28 @@ def test_the_mouse_turns_the_camera_and_calibrates(playing):
     game.mouse(right=40)
     backend.wait_for_inputs()
     yaw, _ = game.view_rotation()
-    assert yaw == pytest.approx(20, abs=1e-6)  # (the sim turns 0.5 degree a pixel, right)
-    drag = [c[2] for c in place.calls if c[0] == mcp.USER_MOUSE_INPUT][-1]
-    assert [a["type"] for a in drag] == ["move", "button_down", "move", "button_up"]
-    assert drag[1]["button"] == "right"
+    assert yaw == pytest.approx(40 * roblox.DEGREES_PER_COUNT, abs=1e-6)  # (right)
+    # (the camera is turned in the player's client with the turn op: Studio's MCP right-drag doesn't reach it)
+    assert (mcp.EXECUTE_LUAU, "Client", ["turn"]) in place.calls
+    assert not [c for c in place.calls if c[0] == mcp.USER_MOUSE_INPUT]
+
+
+def test_mouse_buttons_and_the_wheel_carry_a_position(playing):
+    """Studio's MCP mouse needs a position in every call (a button let go in a call of its own too), has no middle
+    button, and scrolls a notch an action."""
+    game, link, backend, place = playing
+    game.hold("RightMouseButton")
+    backend.wait_for_inputs()
+    game.release("RightMouseButton")
+    backend.wait_for_inputs()
+    game.press("MouseScrollDown", value=3)
+    backend.wait_for_inputs()
+    mouse = [c[2] for c in place.calls if c[0] == mcp.USER_MOUSE_INPUT]
+    assert mouse[0] == [{"action": "mouseButtonDown", "mouse_button": "right", "x": 640, "y": 360}]
+    assert mouse[1] == [{"action": "mouseButtonUp", "mouse_button": "right", "x": 640, "y": 360}]
+    assert mouse[2] == [{"action": "scrollDown", "x": 640, "y": 360}] * 3
+    with pytest.raises(Exception, match="no middle button"):
+        backend.op_key({"key": "MiddleMouseButton", "mode": "press"})
 
 
 def test_pointer_clicks_ui_and_navigation(playing):
@@ -301,15 +319,17 @@ def test_pointer_clicks_ui_and_navigation(playing):
     game.press("LeftMouseButton")
     backend.wait_for_inputs()
     click = [c[2] for c in place.calls if c[0] == mcp.USER_MOUSE_INPUT][-1]
-    assert click == [{"type": "click", "button": "left", "x": 960, "y": 180}]
+    assert click == [{"action": "mouseButtonClick", "mouse_button": "left", "x": 960, "y": 180}]
     game.pointer(world=Vec(560, 280, 56))
     assert backend.pointer_at == (800, 300)
     assert game.ui()[0]["label"] == "Reset"
     game.ui_act(id="Players/Hero/PlayerGui/Hud/Reset")
     assert [c[2] for c in place.calls if c[0] == mcp.USER_MOUSE_INPUT][-1] == [
-        {"type": "click", "button": "left", "instance_path": "game.Players.Hero.PlayerGui.Hud.Reset"}]
+        {"action": "moveTo", "instance_path": "game.Players.Hero.PlayerGui.Hud.Reset"},
+        {"action": "mouseButtonClick", "mouse_button": "left"}]
     game.request("move", {"to": Vec(280, 560, 84).ue()})
-    assert place.calls[-1] == (mcp.CHARACTER_NAVIGATION, None, {"target_position": {"x": 20.0, "y": 3.0, "z": -10.0}})
+    assert place.calls[-1] == (mcp.CHARACTER_NAVIGATION, None, {
+        "datamodel_type": "Client", "x": 20.0, "y": 3.0, "z": -10.0, "studio_id": mcp.FAKE_STUDIO})
 
 
 def test_watch_sees_a_thing_move(playing):

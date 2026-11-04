@@ -6,7 +6,8 @@ prelude's Luau itself runs only in a real Studio.
 
 The place: a character standing on a Baseplate, a coin, a door and a lever (tagged), a leaderstats Coins counter,
 a HUD label, and a console that logs an error once play starts. Keys held move the character (W forward at WalkSpeed
-along the camera's look), a right-drag turns the camera.
+along the camera's look), and the `turn` op turns the camera. The tools answer as the live server's do (their
+arguments, the input actions' JSON, get_studio_state's lines, script_read's line numbers): see docs/studio_tools.txt.
 """
 
 import json
@@ -77,15 +78,20 @@ class Place:
     def game_time(self):
         return round(time.monotonic() - self.t0, 3) if self.running else 0.0
 
-    def turn(self, dx):
-        """A right-drag of dx pixels turns the camera right by dx * 0.5 degrees (about Roblox's up axis)."""
-        a = -math.radians(dx * 0.5)
+    def turn(self, degrees):
+        """Turn the camera right by `degrees` (about Roblox's up axis)."""
+        a = -math.radians(degrees)
         x, z = self.look[0], self.look[2]
         self.look = [x * math.cos(a) + z * math.sin(a), self.look[1], -x * math.sin(a) + z * math.cos(a)]
 
     # -- the ops (as roblox.luau answers them) ------------------------------------------------------------------
 
     def op(self, name, a, datamodel):
+        if name == "turn":
+            if datamodel != "Client":
+                raise RuntimeError("turn: the camera is the client's")
+            self.turn(float(a.get("yaw") or 0.0))
+            return {"look": dict(zip("xyz", self.look))}
         if name == "context":
             client = datamodel == "Client"
             return {"character": "Workspace/Hero" if self.running else "", "player": "Hero" if self.running else "",
@@ -231,7 +237,10 @@ class Place:
         return "ok"
 
     def studio_state(self, args):
-        return json.dumps({"mode": "play" if self.running else "edit"})
+        if self.running:
+            return ("- Current Studio Mode: Play\n- Available DataModels: Client, Server\n"
+                    "- Focused DataModel in the viewport: Client")
+        return "- Current Studio Mode: Edit\n- Available DataModels: Edit\n- Focused DataModel in the viewport: Edit"
 
     def console_output(self, args):
         return "\n".join(self.console)
@@ -241,37 +250,35 @@ class Place:
             self.tick()
             self.calls.append((mcp.USER_KEYBOARD_INPUT, args.get("datamodel_type"), args.get("actions")))
             for act in args.get("actions") or []:
-                if act["type"] == "key_down":
-                    self.held.add(act["key"])
-                elif act["type"] == "key_up":
-                    self.held.discard(act["key"])
-        return "ok"
+                if act["action"] == "keyDown":
+                    self.held.add(act["key_code"])
+                elif act["action"] == "keyUp":
+                    self.held.discard(act["key_code"])
+        return "Success"
 
     def mouse(self, args):
         with self.lock:
             self.calls.append((mcp.USER_MOUSE_INPUT, args.get("datamodel_type"), args.get("actions")))
-            right, last = False, None
+            placed = False
             for act in args.get("actions") or []:
-                if act["type"] == "button_down" and act.get("button") == "right":
-                    right = True
-                elif act["type"] == "button_up" and act.get("button") == "right":
-                    right = False
-                elif act["type"] == "move":
-                    if right and last is not None:
-                        self.turn(act["x"] - last[0])
-                    last = (act["x"], act["y"])
-        return "ok"
+                placed = placed or "instance_path" in act or ("x" in act and "y" in act)
+                if act["action"] != "wait" and not placed:  # (as the live server: a position first)
+                    return {"content": [{"type": "text", "text": "Either x and y, instance_path, or a prior action "
+                                                                 "that establishes mouse position is required"}],
+                            "isError": True}
+                if "mouse_button" in act and act["mouse_button"] not in mcp.MOUSE:
+                    return {"content": [{"type": "text", "text": "mouse_button: left or right"}], "isError": True}
+        return "Success"
 
     def navigate(self, args):
         with self.lock:
             self.calls.append((mcp.CHARACTER_NAVIGATION, None, args))
-            p = args.get("target_position")
-            if p:
-                self.at = [p["x"], self.at[1], p["z"]]
-        return "ok"
+            if "x" in args and "z" in args:
+                self.at = [args["x"], self.at[1], args["z"]]
+        return "Success"
 
     def script_read(self, args):
-        return "1: return {GiveCoin = function(n) end}"
+        return "     1→return {GiveCoin = function(n) end}"
 
     def screen_capture(self, args):
         return PNG_2X2
