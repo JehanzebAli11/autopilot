@@ -22,7 +22,6 @@ import traceback
 
 from .. import engines
 from .session import (
-    EFFORT,
     PACKAGE,
     PROBING,
     READING,
@@ -36,9 +35,17 @@ from .session import (
     system_prompt,
     watch_steering,
 )
+from .session import effort as effort_for
 from .session import model as model_for
 
-MAX_TURNS = int(os.environ.get("AUTOPILOT_TURNS", "120"))
+
+def max_turns():
+    """A limit on the agent's turns only when AUTOPILOT_TURNS asks for one, as the environment says it now
+    (autopilot.env is loaded before every run, after this module is imported): a run is held to its time limit, and a
+    limit on turns, which the agent isn't told of, cuts it off with time left and before it reports."""
+    return int(os.environ.get("AUTOPILOT_TURNS") or 0) or None
+
+
 # The longest system prompt (as quoted on Windows) passed on Claude Code's command line: Windows caps the whole line at
 # 32767 characters, and the rest of it (the CLI's path, tools, settings) takes about 1000; a longer one goes as a file
 PROMPT_ON_COMMAND_LINE = 30000
@@ -172,7 +179,7 @@ def researcher(model, game_tools=()):
 
     return AgentDefinition(description=RESEARCHER_DESCRIPTION, prompt=RESEARCHER_PROMPT, tools=list(LOOKUP),
                            disallowedTools=WRITE + [AGENT] + list(game_tools), model=model, maxTurns=RESEARCH_TURNS,
-                           effort=EFFORT)
+                           effort=effort_for(model))
 
 
 def _guard(session):
@@ -302,7 +309,7 @@ def implement(game, project, prompt, run_id=None, say=None, client=None, model=N
     builtin = LOOKUP + WRITE + ([AGENT] if n_researchers else [])
     options = ClaudeAgentOptions(
         model=model,
-        effort=EFFORT,
+        effort=effort_for(model),
         settings=fast_settings(model),
         system_prompt=system,
         cwd=session.root,
@@ -313,7 +320,7 @@ def implement(game, project, prompt, run_id=None, say=None, client=None, model=N
         forward_subagent_text=True,  # (a researcher's answer and reading reach the message loop: the log)
         permission_mode="acceptEdits",
         setting_sources=[],
-        max_turns=MAX_TURNS,
+        max_turns=max_turns(),
         hooks=_guard(session),
         env=_env(session.root),
     )
