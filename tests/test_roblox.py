@@ -244,7 +244,7 @@ def test_the_plugin_takes_gamepad_and_touch():
     for kind in ("phone", "tablet", "console", "vr"):
         assert re.search(rf"^\t{kind} = {{ form = ", device, re.M), kind
     assert "StudioDeviceSimulatorService" in device and "device_before" in device
-    assert "needs_focus = false" in sources["Client"]
+    assert "needs_focus = false" in sources["Ui"] and "Ui.inputCaps({ playing = true" in sources["Client"]
 
 
 def test_the_plugin_compiles():
@@ -341,3 +341,82 @@ def test_the_detectors_work_only_while_a_run_uses_the_game():
     assert "if not self.active then" in detectors and "if not self.active or not self.enabled" in detectors
     editor = sources["Editor"]
     assert editor.count("run_active = self.runActive") == 2 and 'type = "run", active = self.runActive' in editor
+
+
+class PlacelessLink(ThingsLink):
+    """transforms as the plugin answers an instance with no place in the world (a script, a value, a GUI object):
+    its fields null, `active` still there."""
+
+    def request(self, op, args=None, timeout=None):
+        if op == "transforms":
+            out = {}
+            for o in args["objects"]:
+                if o.endswith("Gone"):
+                    out[o] = None
+                elif o.startswith("/Workspace"):
+                    out[o] = {"location": {"X": 28, "Y": 0, "Z": 56}, "rotation": {"Pitch": 0, "Yaw": 90, "Roll": 0},
+                              "velocity": {"X": 0, "Y": 0, "Z": 0}, "center": {"X": 28, "Y": 0, "Z": 70},
+                              "extent": {"X": 14, "Y": 14, "Z": 14}, "active": True}
+                else:
+                    out[o] = {k: None for k in ("location", "rotation", "velocity", "center", "extent")}
+                    out[o]["active"] = False
+            return {"objects": out}
+        return super().request(op, args, timeout)
+
+
+def test_an_instance_with_no_place_is_there_but_has_no_location():
+    """transforms' `active` for every instance: one with no place (a script) answers null fields, and the kit takes it
+    as there with no location (not as gone, which only a null answer is)."""
+    game = Game(PlacelessLink())
+    script = "/ServerScriptService/GameManager"
+    assert game.loc(script) is None and game.velocity(script) == Vec(0, 0, 0)
+    assert game.bounds(script) == (None, Vec(0, 0, 0))
+    assert game.engine.transforms(game, [script])[script]["active"] is False
+    assert game.locs([script, "/Workspace/Barn", "/Workspace/Gone"]) == {"/Workspace/Barn": Vec(28, 0, 56)}
+    assert game.bounds("/Workspace/Barn") == (Vec(28, 0, 70), Vec(14, 14, 14))
+    with pytest.raises(Exception, match="does not exist"):
+        game.loc("/Workspace/Gone")
+
+
+def test_the_plugin_speaks_the_protocol_as_the_other_plugins():
+    """Godot's (and Unity's) protocol, in Roblox's terms: context and hello `input` with notes; context `net` (a client
+    of the game's server, rc on the server); session status `loading` and `scene`, a map that isn't the place 404,
+    session events with the scene; move via auto/stick/keys/controller, scale -1..1; ui's text_input `text`; find's
+    limit and an unknown class 400; transforms' `active`; no-game screen/ui/timestep; hello's `pointer`."""
+    sources = _sources()
+    editor, client, ui, world = sources["Editor"], sources["Client"], sources["Ui"], sources["World"]
+    hello = editor[editor.index('local h: any = { type = "hello"'):]
+    hello = hello[:hello.index("}\n")]
+    assert '"pointer"' in hello and "input = Ui.inputCaps({ playing = false })" in hello
+    caps = ui[ui.index("function Ui.inputCaps"):]
+    caps = caps[:caps.index("\nend\n")]
+    for field in ('handling = "roblox"', "keys = true", "actions = true", "pointer = true", 'move = "stick"',
+                  "notes = notes", "keys_reach = reach", "needs_focus = false", "touch = touch", "out.pad = opts.pad"):
+        assert field in caps, field
+    for note in ("right mouse button is held", "Escape", "touch device", "Scriptable", "didn't reach the game"):
+        assert note in caps, note
+    context = editor[editor.index("function Editor:_editorContext"):]
+    context = context[:context.index("\nend\n")]
+    assert "input = Ui.inputCaps" in context and 'net = { mode = "standalone" }' in context
+    assert 'mode = "client", rc_side = "server"' in client and "out.clients = n" in client and "net = net()," in client
+    # session
+    assert "loading = self:loading(), scene = game.Name" in editor and "function Editor:loading(): boolean" in editor
+    assert "self.joining = true" in editor and "self.joining = false" in editor
+    assert ': a Roblox place is one level (" .. game.Name .. ")", 404)' in editor
+    assert editor.count('kind = "session"') == 2 and editor.count("scene = game.Name } }") == 2
+    # no game
+    for answer in ('op == "screen" then', "texts = Json.object()", 'op == "ui" then', "elements = {}",
+                   'op == "timestep" then'):
+        assert answer in editor, answer
+    # move
+    assert ('local VIAS = { auto = "stick", stick = "stick", humanoid = "stick", keys = "keys", '
+            'controller = "controller" }') in client
+    assert "move: unknown via" in client and "math.clamp(tonumber(args.scale) or 1, -1, 1)" in client
+    assert "(hum :: Humanoid):Move(v, false)" in client and "moved = Frame.r2(moved), via = via" in client
+    # ui
+    assert "item.text = (g :: TextBox).Text" in ui and "item.value = item.text" in ui and "item.placeholder" in ui
+    # find, transforms
+    assert "tonumber(args.limit) or 10000" in world and ":GetClass(cls)" in world
+    assert '"find: no class, tag or script named "' in world and "return false, why, 400" in client
+    assert "function World.activeOf(inst: Instance): boolean" in world
+    assert world.count("active = active") == 2 and "location = Json.null" in world

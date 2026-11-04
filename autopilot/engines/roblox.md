@@ -17,7 +17,8 @@
   `LocalPlayer`, `Character`, `Humanoid` and `Camera` name the player's own.
 - **Finding things**: `game.actors("Model")` / `game.actors("BasePart")` (a Roblox class, subclasses too),
   `game.actors("tag:Enemy")` (a CollectionService tag; a plain name that is a tag and no class works too), or the name
-  of a script inside a model (`game.actors("DoorScript")`: the models holding a script of that name).
+  of a script inside a model (`game.actors("DoorScript")`: the models holding a script of that name); a name that is
+  none of these is an error.
   `game.all_actors()`: the Workspace's things (its models and parts at the top or in folders, not the parts inside a
   model; a model of models, such as a level's "Map", is a folder). `game.named("coin")` searches those by name.
 - **Reads and calls**: a property name is a property of the instance's class (`Transparency`, `CFrame`, `Health`), else
@@ -78,15 +79,21 @@
   `game.context()["camera_type"]` and `["mouse_behavior"]` say which. A game with a Scriptable camera turns the view in
   its own code: read it.
 - **Moving without the keys**: `game.request("move", {"direction": kit vector, "seconds": s})` walks the character
-  that way as an analog stick would (the player's Move, after the PlayerModule's; `"via": "keys"` for W/A/S/D);
-  answers `{"moved"}`.
+  that way as an analog stick would (the player's Move, after the PlayerModule's: `"via": "stick"`, the default;
+  `"keys"` for W/A/S/D; `"controller"` for the Humanoid's own Move, for a game whose controls don't go through the
+  Player); `scale` -1..1 (negative walks the other way); answers `{"moved", "via"}`.
 - **UI**: `game.screen()` keys texts `<ScreenGui>.<Name>` (TextLabels, TextButtons, TextBoxes in the player's
-  PlayerGui); `game.ui()` lists GuiButtons (`button`) and TextBoxes (`text_input`) on screen; `ui_act` clicks with the
-  mouse at the element's middle (its answer's `fired` says whether the button took it); `action="set"` types into a
-  TextBox and submits it. Texts in the world (SurfaceGui, BillboardGui) are in `view`'s `look.texts`.
+  PlayerGui); `game.ui()` lists GuiButtons (`button`) and TextBoxes (`text_input`, its `text` and `placeholder`) on
+  screen; `ui_act` clicks with the mouse at the element's middle (its answer's `fired` says whether the button took it);
+  `action="set"` types into a TextBox and submits it. Roblox has no checkbox, slider or drop-down of its own: a game's
+  are its own buttons and frames (click them; read their state with `game.get`). Texts in the world (SurfaceGui,
+  BillboardGui) are in `view`'s `look.texts`.
 - **Sessions**: a run plays the place in Studio as the Play button does (a server and one player). `game.restart()`
   stops the session and plays again: the server's and client's scripts start over, the place as it is saved in Studio
   (nothing a session changed stays). Game time (`game.t`) is the Workspace's DistributedGameTime, from 0 in each session.
+  `game.context()["net"]` is `{"mode": "client", "rc_side": "server"}` (with `clients`, the players, in a multiplayer
+  test): the run plays a client, and reads and writes go to the server. `game.loc(path)` of an instance with no place
+  (a script, a value, a GUI object) is None; `game.engine.transforms(game, [path])` still says whether it is `active`.
 - **Several players**: most Roblox games are multiplayer, and some bugs only show with two players (state kept per
   player, what one player does reaching another's screen, handing things over, teams). `game.restart(players=2)` plays
   the place as Studio's multiplayer test does (a server and a client per player, each a Studio window of its own:

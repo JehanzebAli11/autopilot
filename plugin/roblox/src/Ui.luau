@@ -6,7 +6,9 @@
 -- getting "#2", "#3". An element counts when it and every GuiObject above it are Visible, its ScreenGui is Enabled, it
 -- is on the screen and its text isn't fully transparent. ui_act acts as the player's mouse does: the mouse is moved to
 -- the element's middle and pressed there (so whatever is on top gets the click, as for a player); the answer says
--- whether the button's Activated came ("fired").
+-- whether the button's Activated came ("fired"). Kinds: `button` (a GuiButton) and `text_input` (a TextBox: `text`,
+-- `placeholder`); Roblox has no checkbox, slider or combo of its own (a game builds them from buttons and frames), so
+-- there are no such kinds: they list as their buttons.
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -198,7 +200,9 @@ function Ui.list(): { any }
 			label = label, enabled = enabled, path = Paths.of(g), class = g.ClassName,
 			screen = { x = math.round(m.X), y = math.round(m.Y) } }
 		if g:IsA("TextBox") then
-			item.value = (g :: TextBox).Text
+			-- (`text` as the other plugins' text_input; `value` kept for older brains)
+			item.text = (g :: TextBox).Text
+			item.value = item.text
 			if (g :: TextBox).PlaceholderText ~= "" then
 				item.placeholder = (g :: TextBox).PlaceholderText
 			end
@@ -396,6 +400,55 @@ local function where(at: Vector2): any
 	local vp = if cam then cam.ViewportSize else Vector2.one
 	return { x = math.round(at.X), y = math.round(at.Y), screen_x = Frame.r2(at.X / vp.X * 2 - 1),
 		screen_y = Frame.r2(1 - at.Y / vp.Y * 2) }
+end
+
+-- How input reaches the game (context's and the hello's `input`, in the other plugins' shape: `handling`, `keys`,
+-- `actions`, `pointer`, `move` (what `move`'s "auto" does) and `notes`, what an agent should know here), with Roblox's
+-- own fields beside them: `keys_reach` (the keys Studio's virtual input sends reach the game: false after one didn't),
+-- `needs_focus` (false: they reach it whether or not Studio is in front), `keyboard`, `mouse`, `gamepad`, `touch` (the
+-- device Studio simulates is a touch device) and `pad` (the sticks and triggers held, during play). o: {playing,
+-- keys_reach, pad}.
+function Ui.inputCaps(o: any?): any
+	local opts = o or {}
+	local playing = opts.playing == true
+	local reach = opts.keys_reach ~= false
+	local touch = UserInputService.TouchEnabled
+	local notes = {}
+	local cam = workspace.CurrentCamera
+	local scriptable = playing and cam ~= nil and cam.CameraType == Enum.CameraType.Scriptable
+	local locked = playing and UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default
+	if scriptable then
+		table.insert(notes, "The camera is Scriptable: the game's own code moves it, so MouseX/MouseY and the right "
+			.. "stick turn the view only if that code reads them; read the game's camera script.")
+	elseif locked then
+		table.insert(notes, "The game locks the mouse (MouseBehavior " .. UserInputService.MouseBehavior.Name
+			.. ": first person, shift lock or its own camera): the view turns with MouseX/MouseY alone.")
+	else
+		table.insert(notes, "Roblox's default camera turns only while the right mouse button is held (a player "
+			.. "drags): MouseX/MouseY (game.turn, look_at) hold it for the turn by themselves; the mouse moved "
+			.. "without it (pointer) doesn't turn the view.")
+	end
+	table.insert(notes, "Point before clicking (pointer): the mouse buttons press where the pointer is (the middle of "
+		.. "the view until it is set); ui_act points at an element's middle by itself.")
+	table.insert(notes, "Escape, and ButtonB, ButtonStart and DPadUp on a console, are Roblox's own (its menus): a "
+		.. "press of one is refused (409).")
+	if touch then
+		table.insert(notes, "Studio simulates a touch device: the game gets touches (the touch request: tap, swipe, "
+			.. "a drag on Roblox's on-screen thumbstick walks), the camera turns by a finger's drag on the right half "
+			.. "of the screen, not by MouseX; keys still reach the game.")
+	end
+	if not reach then
+		table.insert(notes, "A key didn't reach the game from Studio's virtual input lately: walking, jumping and "
+			.. "prompts go in as Roblox's own controls take them meanwhile (W/A/S/D, SpaceBar, a prompt's key); other "
+			.. "keys and the game's own bindings don't get them. move with \"via\": \"stick\" still walks.")
+	end
+	local out: any = { handling = "roblox", keys = true, actions = true, pointer = true, move = "stick", notes = notes,
+		keys_reach = reach, needs_focus = false, keyboard = true, mouse = true,
+		gamepad = "buttons as KeyCodes; sticks and triggers as Roblox's gamepad controls take them", touch = touch }
+	if opts.pad ~= nil then
+		out.pad = opts.pad
+	end
+	return out
 end
 
 -- `pointer`: put the mouse at a spot (Ui.spot), without moving it across. -> {"screen_x", "screen_y", "x", "y",

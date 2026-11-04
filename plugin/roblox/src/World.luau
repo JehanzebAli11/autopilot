@@ -153,18 +153,22 @@ function World.isOf(inst: Instance, cls: string): boolean
 	return false
 end
 
+-- Whether a name is a Roblox class's (ReflectionService:GetClass: nil for a name no class has; IsA never says, it
+-- answers false). Where ReflectionService can't tell, every name may be one.
 local function isClassName(cls: string): boolean
-	local ok = pcall(function()
-		return game:IsA(cls)
+	local ok, c = pcall(function()
+		return (game:GetService("ReflectionService") :: any):GetClass(cls)
 	end)
-	return ok
+	return not ok or c ~= nil
 end
 
--- `find`: {"class"?, "name"?, "limit"?, "things"?} -> {"objects": [paths]}
-function World.find(args: any): any
+-- `find`: {"class"?, "name"?, "limit"? (10000), "things"?} -> {"objects": [paths]}; also why, for a class nothing is
+-- (no Roblox class, tag or script of that name: the op answers 400).
+function World.find(args: any): (any, string?)
 	local cls = tostring(args.class or "")
 	local name = string.lower(tostring(args.name or ""))
-	local limit = tonumber(args.limit) or 1000
+	local limit = tonumber(args.limit) or 10000
+	local known = cls == "" or string.sub(cls, 1, 4) == "tag:" or isClassName(cls)
 	local out = {}
 	local candidates: { Instance }
 	if string.sub(cls, 1, 4) == "tag:" then
@@ -172,9 +176,10 @@ function World.find(args: any): any
 		cls = ""
 	elseif args.things then
 		candidates = World.things()
-	elseif cls ~= "" and not isClassName(cls) and #CollectionService:GetTagged(cls) > 0 then
+	elseif not known and #CollectionService:GetTagged(cls) > 0 then
 		candidates = CollectionService:GetTagged(cls)
 		cls = ""
+		known = true
 	else
 		candidates = {}
 		for _, s in ipairs(World.SERVICES) do
@@ -205,7 +210,22 @@ function World.find(args: any): any
 			table.insert(out, p)
 		end
 	end
-	return { objects = out }
+	if #out == 0 and not known then
+		-- (no class and no tag of that name: a script of that name, anywhere the search walks, makes it a kind)
+		for _, s in ipairs(World.SERVICES) do
+			local svc = game:FindFirstChild(s)
+			if svc then
+				for _, d in ipairs(svc:GetDescendants()) do
+					if d.Name == cls and d:IsA("LuaSourceContainer") then
+						return { objects = out }, nil
+					end
+				end
+			end
+		end
+		return { objects = out }, "find: no class, tag or script named " .. cls
+			.. " (a Roblox class such as BasePart or Model, tag:<name>, or a script's name)"
+	end
+	return { objects = out }, nil
 end
 
 -- The axis-aligned box (centre, size, studs) around an oriented box.
@@ -268,19 +288,58 @@ function World.velocity(inst: Instance): Vector3
 	return Vector3.zero
 end
 
+-- Whether an instance takes part in the game now (transforms' `active`, as the other plugins'): in the DataModel; a
+-- part not fully transparent; a script, light, effect, prompt or anything else with an Enabled property enabled; a GUI
+-- object visible, with every GuiObject above it, in an enabled ScreenGui (or SurfaceGui, BillboardGui) that is shown
+-- (a ScreenGui only in a player's PlayerGui).
+function World.activeOf(inst: Instance): boolean
+	if inst.Parent == nil or not inst:IsDescendantOf(game) then
+		return false
+	end
+	if inst:IsA("BasePart") and (inst :: BasePart).Transparency >= 1 then
+		return false
+	end
+	local okE, enabled = pcall(function()
+		return (inst :: any).Enabled
+	end)
+	if okE and enabled == false then
+		return false
+	end
+	if inst:IsA("GuiObject") then
+		local x: Instance? = inst
+		while x and x:IsA("GuiObject") do
+			if not (x :: GuiObject).Visible then
+				return false
+			end
+			x = x.Parent
+		end
+		local gui = inst:FindFirstAncestorWhichIsA("LayerCollector")
+		if gui == nil or not gui.Enabled then
+			return false
+		end
+		if gui:IsA("ScreenGui") and gui:FindFirstAncestorWhichIsA("PlayerGui") == nil then
+			return false -- (a StarterGui template: copied to each player, never shown itself)
+		end
+	end
+	return true
+end
+
 function World.transformOf(inst: Instance): any
+	local active = World.activeOf(inst)
 	local cf = World.pivot(inst)
 	if cf == nil then
-		return Json.null
+		-- (no place in the world: a script, a value, a GUI object, a service; still there)
+		return { location = Json.null, rotation = Json.null, velocity = Json.null, center = Json.null,
+			extent = Json.null, active = active }
 	end
 	local center, size = World.box(inst)
 	center = center or cf.Position
 	size = size or Vector3.zero
 	return { location = Frame.kit(cf.Position), rotation = Frame.kitRot(cf), velocity = Frame.kit(World.velocity(inst)),
-		center = Frame.kit(center), extent = Frame.kitExtent(size) }
+		center = Frame.kit(center), extent = Frame.kitExtent(size), active = active }
 end
 
--- `transforms`: {"objects": [paths]} -> {"objects": {path: {...} | null}}
+-- `transforms`: {"objects": [paths]} -> {"objects": {path: {..., "active"} | null (no such instance)}}
 function World.transforms(args: any, resolve: (string) -> Instance?): any
 	local out = Json.object()
 	for _, p in ipairs(args.objects or {}) do

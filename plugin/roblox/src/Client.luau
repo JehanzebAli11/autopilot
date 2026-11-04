@@ -119,6 +119,18 @@ function Client.start(plugin: Plugin)
 		return out
 	end
 
+	-- How the game is networked (the other plugins' context `net`): a Roblox play session is always a client of the
+	-- game's server (Studio runs both), and `rc` reads and changes the server's copy (`rc_side`: the agent service's
+	-- network note says so); `clients`: the players of a multiplayer test.
+	local function net(): any
+		local out: any = { mode = "client", rc_side = "server" }
+		local n = #Players:GetPlayers()
+		if n > 1 then
+			out.clients = n
+		end
+		return out
+	end
+
 	local function context(): any
 		local char = World.character()
 		local cam = workspace.CurrentCamera
@@ -132,9 +144,8 @@ function Client.start(plugin: Plugin)
 			mouse_behavior = UserInputService.MouseBehavior.Name,
 			place_id = game.PlaceId, universe_id = game.GameId,
 			-- (what the player's input is: the keys reach the game, focused or not; the device Studio simulates)
-			input = { keys_reach = not unfocused, needs_focus = false, keyboard = true, mouse = true,
-				gamepad = "buttons as KeyCodes; sticks and triggers as Roblox's gamepad controls take them",
-				touch = UserInputService.TouchEnabled, pad = Pad.state() },
+			input = Ui.inputCaps({ playing = true, keys_reach = not unfocused, pad = Pad.state() }),
+			net = net(),
 			device = Device.describe() }
 	end
 
@@ -304,23 +315,34 @@ function Client.start(plugin: Plugin)
 			value = args.value }, id)
 	end
 
-	-- `move`: walk the player in a kit-frame direction for `seconds`, as Roblox's own controls do with an analog stick:
-	-- the direction goes to the player's Move every frame, after the PlayerModule's ("via": "humanoid", the default),
-	-- or the W/A/S/D keys toward it, 8 ways ("via": "keys").
+	-- `move`: walk the player in a kit-frame direction for `seconds`. `via` (as the other plugins'): "stick" (as
+	-- Roblox's own controls do with an analog stick: the direction goes to the player's Move every frame, after the
+	-- PlayerModule's; "humanoid" is the same), "keys" (the W/A/S/D keys toward it, 8 ways), "controller" (the
+	-- character's Humanoid:Move itself, every frame: a game whose controls don't go through the Player), "auto" (the
+	-- default: "stick"). `scale` -1..1 (negative: the other way). -> {"moved", "via"}
+	local VIAS = { auto = "stick", stick = "stick", humanoid = "stick", keys = "keys", controller = "controller" }
 	local function moveOp(args: any, _id: any): (boolean, any, number?)
+		local asked = tostring(args.via or "auto")
+		local via = VIAS[asked]
+		if via == nil then
+			return false, "move: unknown via " .. asked .. " (auto, stick, keys or controller)"
+		end
 		local root = World.root()
 		if root == nil then
 			return false, "No player character"
 		end
 		local lp = Players.LocalPlayer
+		local hum = World.humanoid()
+		if via == "controller" and hum == nil then
+			return false, "move via controller: the player's character has no Humanoid", 409
+		end
 		local want = Frame.fromKitDir(args.direction or {})
 		want = Vector3.new(want.X, 0, want.Z)
 		if want.Magnitude > 1e-4 then
 			want = want.Unit
 		end
-		local scale = math.clamp(tonumber(args.scale) or 1, 0, 1)
+		local scale = math.clamp(tonumber(args.scale) or 1, -1, 1)
 		local seconds = tonumber(args.seconds) or 0.35
-		local via = tostring(args.via or "humanoid")
 		local start = root.Position
 		local started = os.clock()
 		if via == "keys" then
@@ -351,18 +373,24 @@ function Client.start(plugin: Plugin)
 			end
 		else
 			local name = "AutopilotMove" .. tostring(math.random(1, 1e9))
-			RunService:BindToRenderStep(name, Enum.RenderPriority.Input.Value + 1, function()
+			-- (stick: the Player's Move, as the PlayerModule's controls call it; controller: the Humanoid's own)
+			local function push(v: Vector3)
 				pcall(function()
-					lp:Move(want * scale, false)
+					if via == "controller" then
+						(hum :: Humanoid):Move(v, false)
+					else
+						lp:Move(v, false)
+					end
 				end)
+			end
+			RunService:BindToRenderStep(name, Enum.RenderPriority.Input.Value + 1, function()
+				push(want * scale)
 			end)
 			while os.clock() - started < seconds and root.Parent do
 				RunService.Heartbeat:Wait()
 			end
 			RunService:UnbindFromRenderStep(name)
-			pcall(function()
-				lp:Move(Vector3.zero, false)
-			end)
+			push(Vector3.zero)
 		end
 		local moved = ((root.Position - start) * Vector3.new(1, 0, 1)).Magnitude * Frame.SCALE
 		return true, { moved = Frame.r2(moved), via = via }
@@ -424,7 +452,11 @@ function Client.start(plugin: Plugin)
 			return Media.record(args, h)
 		end,
 		find = function(args)
-			return true, World.find(args)
+			local out, why = World.find(args)
+			if why then
+				return false, why, 400
+			end
+			return true, out
 		end,
 		transforms = function(args)
 			return true, World.transforms(args, Paths.resolve)
