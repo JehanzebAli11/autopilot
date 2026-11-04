@@ -218,22 +218,25 @@ function World.aabb(cf: CFrame, size: Vector3): (Vector3, Vector3)
 	return cf.Position, Vector3.new(ex * 2, ey * 2, ez * 2)
 end
 
--- The world box of a thing (centre and size, studs), or nil: a model's bounding box, a part's box, an attachment's
--- point; a GUI object has none.
-function World.box(inst: Instance): (Vector3?, Vector3?)
+-- The world box of a thing (centre and size, studs, world-aligned), or nil: a model's bounding box, a part's box, an
+-- attachment's point; a GUI object has none. Then its own box, as it is turned: its CFrame and its size along its own
+-- axes (a part's CFrame and Size, a model's GetBoundingBox; nil for an attachment).
+function World.box(inst: Instance): (Vector3?, Vector3?, CFrame?, Vector3?)
 	if inst:IsA("BasePart") then
-		return World.aabb(inst.CFrame, inst.Size)
+		local c, s = World.aabb(inst.CFrame, inst.Size)
+		return c, s, inst.CFrame, inst.Size
 	elseif inst:IsA("Model") then
 		local ok, cf, size = pcall(function()
 			return (inst :: Model):GetBoundingBox()
 		end)
 		if ok then
-			return World.aabb(cf, size)
+			local c, s = World.aabb(cf, size)
+			return c, s, cf, size
 		end
 	elseif inst:IsA("Attachment") then
-		return inst.WorldPosition, Vector3.zero
+		return inst.WorldPosition, Vector3.zero, nil, nil
 	end
-	return nil, nil
+	return nil, nil, nil, nil
 end
 
 -- The pivot (where it is and which way it faces) of a thing, or nil.

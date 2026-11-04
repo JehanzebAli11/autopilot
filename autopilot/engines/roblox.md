@@ -102,9 +102,13 @@
   other engines while a game plays; Studio must have its MCP server on (Assistant, ..., Manage MCP Servers). When it
   isn't, there are no frames: settle a request about how something looks by what `game.view` tells (parts shown,
   transparency, colours read with `game.get`, lights, animations, sounds, effects, texts) and say so.
-- **What `view` tells**: visible things (name, path, class, tags, center, size, distance, screen position,
-  crosshair_on, health of a Humanoid, look: parts, lights, animations, sounds, effects, texts) and the body (on_ground,
-  falling, state, health, standing_on, touching, floor slope) and, with `sonar=True`, the sonar ways. It has no `held`,
-  `openings`, `ways_up` or `lane` (listed in its `omitted`): `walk_to` finds no way up to a raised goal by itself, so
-  walk it to a ramp's or stairs' foot and top first. Detectors: errors and warnings the game's scripts print (server
-  and client), NaN positions, parts falling out of the world, long falls, hitches, on-screen counts above their maximum.
+- **What `view` tells**: as the other engines' (its `omitted` is empty): visible things (name, path, class, tags,
+  center, size, distance, screen position, crosshair_on and crosshair_part, health of a Humanoid, tilt and box,
+  blocks_player, body_center, the top surface's slope and ends, look: parts, lights, animations, sounds, effects,
+  texts, highlighted, limp), `held` (an equipped Tool, what is welded onto the character, the camera's viewmodel),
+  `scene.sun`, the body (on_ground, falling, state, health, standing_on, touching, floor slope, overhead), with
+  `ways_up=True` the ramps and stairs up from the player's floor (`walk_to` climbs them to a raised goal), with
+  `openings=True` the gaps round it, and with `sonar=True` the sonar ways.  A Humanoid steps up a ledge lower than
+  `movement()`'s `step` and walks slopes to its MaxSlopeAngle (taken as at most 60 degrees).  Detectors: errors and
+  warnings the game's scripts print (server and client), NaN positions, parts falling out of the world, long falls,
+  hitches, on-screen counts above their maximum.

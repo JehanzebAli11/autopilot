@@ -177,7 +177,7 @@ up; roll `-deg(rz)`.
 | `key` | Unreal key names (W, SpaceBar, LeftShift, One, F5, Enter, LeftMouseButton, MouseX/MouseY in pixels, MouseY positive up, MouseScrollUp/Down, MouseWheelAxis, the `Gamepad_` keys), a KeyCode's name (ButtonA, DPadLeft too), or a ContextActionService action's name (its first key). Through Studio's virtual input, focused or not. A press stays down 0.05 s and 2 frames; holds are leased; `seconds` makes a timed hold. MouseX/MouseY with the mouse free hold the right button for the turn (Roblox's default camera turns only while it is held). Gamepad buttons go in as their KeyCodes (UserInputType Keyboard: ContextActionService actions and InputBegan see the KeyCode); ButtonA also jumps unless the game bound it. `Gamepad_LeftX`/`LeftY` (-1..1) walk the player relative to the camera, `Gamepad_RightX`/`RightY` turn the camera (about 240°/s), `Gamepad_LeftTriggerAxis`/`RightTriggerAxis` past 0.5 are L2/R2: held with `value` (a press pushes for 0.15 s). A key Roblox keeps for its menus (Escape; ButtonB, ButtonStart, DPadUp on a console): 409. |
 | `input` | A ContextActionService action by name: its first key, as `key`. |
 | `move` | `{"direction": kit vector, "seconds", "scale"?, "via"?}`: the player's `Move` toward it every frame, after the PlayerModule's (`via: "humanoid"`, as an analog stick), or W/A/S/D toward it (`via: "keys"`, 8 ways). Answers `{"moved", "via"}`. |
-| `watch` | Pivots sampled every frame (`moved` in kit units, `turned`, `changed size`); with `drawn`, the biggest parts in the thing's own frame and `part shown/hidden`, `light on/off`, `animation started/ended` (the Animator's tracks), `sound started/ended`, `effect started/ended` (particles, fire, beams, trails). |
+| `watch` | Pivots sampled every frame (`moved` in kit units, `turned`, `changed size`); with `drawn`, the biggest parts in the thing's own frame and `part shown/hidden`, `light on/off`, `animation started/ended` (the Animator's tracks), `sound started/ended`, `effect started/stopped` (particles, fire, beams, trails), `went limp`. |
 | `view` | See below. |
 | `screen` | The visible texts of TextLabels, TextButtons and TextBoxes in the player's PlayerGui (ContentText), keyed `<ScreenGui>.<Name>` (`#2`, `#3` for repeats). |
 | `ui`, `ui_act` | GuiButtons (`button`) and TextBoxes (`text_input`) on screen, with `path`, `class`, `screen` (their middle in viewport pixels, top bar inset included). `click` (and `right_click`, `double_click`) moves the mouse there and presses it: the answer's `fired` says whether the button's `Activated` came. `set` types into a TextBox and submits it (`FocusLost` with Enter); `drag` presses on one and lets go on another. |
@@ -194,18 +194,45 @@ up; roll `-deg(rz)`.
 
 ### `view`
 
-The Workspace's things inside the camera's view that a line of sight from the camera reaches (the box's centre, top or
-nearest point), nearest first, up to `max_count` within `max_distance`; the player and a large floor it stands on are
-left out, and a thing with no visible part. Each has `name`, `path`, `class`, `tags`, `center`, `size`, `yaw`,
-`distance`, `screen_x` / `screen_y` (-1..1, right and up positive), `partly_in_view`, `speed`, `top_above_feet`,
-`bottom_above_feet`, `crosshair_on` (a ray from the view's middle), `health` / `max_health` (a Humanoid's), `player`
-(another player's character), `look` (`parts`: visible parts' names, `lights`, `animation`, `sounds`, `effects`,
-`texts`: SurfaceGui and BillboardGui) and `label`. `camera` has `location`, `yaw`, `pitch`, `fov` (horizontal), `vfov`,
-`type`. `body` has `velocity`, `feet_z`, `on_ground`, `falling`, `state` (the Humanoid's), `health`, `standing_on`,
-`floor_slope_degrees`, `touching`. `sonar` works as in Unreal: a box the body's width swept each way above its step
-height (a walkable slope or a step is gone up), rays down for drops (`by`: wall, drop, reach). Not provided (the
-answer's `omitted`): `held`, `scene.sun`, `openings`, `ways_up`, `lane`, slope ends, `body.under` / `overhead`,
-`highlighted`, `limp`.
+What Unreal's tells (its `omitted` is empty).  The Workspace's things inside the camera's view that a line of sight from
+the camera reaches (the box's centre, top or nearest point), nearest first, up to `max_count` within `max_distance`;
+the player, what it holds, a thing with no visible part and the ground are left out (a large floor it stands on, and
+anything wider than `floor_size`, 4000 units, and flat).  Each has `name`, `path`, `class`, `tags`, `center`, `size`,
+`yaw`, `distance`, `screen_x` / `screen_y` (-1..1, right and up positive), `partly_in_view`, `speed`, `top_above_feet`,
+`bottom_above_feet`, `crosshair_on` (a ray from the view's middle) and `crosshair_part` (the character's part it is on),
+`tilt` (`pitch`, `roll` when tipped a degree or more) and `box` (its own box when turned: a part's CFrame and Size, a
+model's GetBoundingBox: `center`, `size` along its own axes, `rotation`), `blocks_player` (the body is against it),
+`health` / `max_health` (a Humanoid's), `player` (another player's character), for a model with a Humanoid
+`body_center` and `body_shown` (rays through a 7×7 grid over its box: the middle of what is seen of it, and how much
+shows), `look` (`parts`: visible parts' names, `lights`, `animation`, `sounds`, `effects`: `[{"asset", "scale"}]` of its
+particles, fire, smoke, sparkles, beams and trails on, by name, `scale` its model's GetScale; `texts`: SurfaceGui and
+BillboardGui; `highlighted`: an enabled Highlight or a visible SelectionBox or handle adornment on it, inside it or in
+the PlayerGui, the camera or the Workspace's top; `limp`: its Humanoid in the Physics, Ragdoll or FallingDown state,
+or most of its Motor6Ds off with BallSocketConstraints on) and `label`; and its top surface (as Unreal's and Godot's
+lib/reach.gd, `src/Reach.luau`): `top_slope_degrees` along the way its own box's top face rises most (on its own
+collision, so a WedgePart's slope; its box's top face when nothing of it collides) and, for a slope a body walks (5 to
+50 degrees), `low_end`, `high_end`, `lane` and `uphill`.
+
+`held`: what the player holds: an equipped Tool (`attached_at` the hand gripping it), what outside the character is
+welded onto it (a Weld, WeldConstraint, Motor6D or RigidConstraint: a thing carried; `attached_at` the character's part;
+not a seat it sits in, nothing anchored) and the camera's children (a viewmodel), with something drawn; not
+Accessories.  Each `name`, `path`, `class`, `look.parts` (biggest first), `center`, `size`, `distance`, `screen_x` /
+`screen_y`, `in_view`; nearest the camera first.  Held things are left out of every ray, as the character is.
+`scene.sun`: the Lighting's Brightness while the sun is up, else 0.
+
+`camera` has `location`, `yaw`, `pitch`, `fov` (horizontal), `vfov`, `type`.  `body` has `velocity`, `feet_z`,
+`on_ground`, `falling`, `state` (the Humanoid's), `health`, `standing_on`, `floor_slope_degrees`, `touching` and
+`overhead` (the first thing straight above the head within `overhead_reach`, 2000 units, when it is in view, against
+the body or within 10 units).  With `openings` or `ways_up` asked, `under` (what is straight above, whatever is in
+view), and, found by the body's own rays and Blockcasts (its CollisionGroup, CanCollide respected): `openings` and
+`free`, and `ways_up` (the ramps and stairs up from its floor it sees: `turn`, `distance_to_foot`, `rises_by`,
+`top_distance`, `foot`, `top`, `seen_from` "side" with `reachable_straight`, `lane`, `inside`) within `openings_reach`
+(3000 units), as Godot's.  A Humanoid steps up: the floor may rise from one place to the next by `movement`'s `step`
+(0.9 × HipHeight) at once, or by what a slope no steeper than its MaxSlopeAngle (taken as at most 60 degrees: the
+default, 89, would make a wall a slope) rises over the way, so stairs whose risers are lower than the step are a way
+up.  The terrain is a floor and a wall like any part, never a thing.  `sonar` works as in Unreal: a box the body's width
+swept each way above its step height (a walkable slope or a step is gone up), rays down for drops (`by`: wall, drop,
+reach).  With `only`: no `held`, `scene`, `overhead`, openings, ways up, top surfaces or `body_center`.
 
 ## Pictures of the game
 
@@ -281,7 +308,7 @@ All paths are under `plugin/roblox/`.
 | `src/Media.luau` | `capture`, `record` from StudioCaptureService, once Studio gives plugins pictures. |
 | `src/Fallback.luau` | Keys for a game that took none: walking, jumping, prompts as Roblox's own controls put them. |
 | `src/Rc.luau`, `src/Values.luau`, `src/Paths.luau` | `rc`: reads, writes, calls, descriptions; values to and from JSON; instances by path. |
-| `src/World.luau`, `src/Sight.luau`, `src/Ui.luau` | find, transforms, pose, movement; view, sonar, watch; screen, ui, ui_act, pointer, touch. |
+| `src/World.luau`, `src/Sight.luau`, `src/Reach.luau`, `src/Ui.luau` | find, transforms, pose, movement; view, sonar, watch; the room round the body (openings, ways up) and top surfaces; screen, ui, ui_act, pointer, touch. |
 | `src/Codex.luau`, `src/Detectors.luau` | The codex; the in-game detectors. |
 | `src/Frame.luau`, `src/Json.luau`, `src/Settings.luau` | The kit frame; JSON (empty objects, NaN); the plugin's settings. |
 | `dev/` | The development loader (`AutopilotDev.server.luau`) and its client relay (`DevRelay.luau`): never built into the plugin. |

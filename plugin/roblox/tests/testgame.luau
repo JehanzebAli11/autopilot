@@ -6,11 +6,13 @@
 --    opens the Gate, a Crate to jump on, a Pond, a Mailbox with a ClickDetector, a row of three same-named Posts, and
 --    for two players a Basket and a Cart: a player picks the basket up (E at it), its carrier hands it to another player
 --    (G at them: a "HandOver" prompt on every player), and the cart takes it (E at the cart) only from a player it was
---    handed to (the Cart's Loaded and LoadedBy; a refusal says why in its Refused);
+--    handed to (the Cart's Loaded and LoadedBy; a refusal says why in its Refused); and away to the west the Lookout,
+--    a platform higher than a jump whose only way up is a Ramp, with a Beacon on top;
 --  - ReplicatedStorage/GameState (a ModuleScript: collected, gateOpen, total, addLantern, basketCarrier, handoffs,
 --    basketLoaded) and Remotes (Ring, Wave, BasketChanged);
 --  - ServerScriptService/GroveService: leaderstats.Lanterns, collecting, the lever, the remotes, the basket;
 --  - StarterGui/HUD ("Lanterns n / 6", "Basket: ...") and Menu (a Ring button, a Name box);
+--  - StarterPack/Torch: a Tool (the hotbar's first);
 --  - StarterPlayerScripts/GroveControls: Q waves (ContextActionService action "Wave"); a player's own HandOver prompt
 --    is off for that player.
 -- Three planted bugs: the Mailbox's script indexes nil when clicked (log_error), the Gate's door, once opened, falls
@@ -21,12 +23,13 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local StarterGui = game:GetService("StarterGui")
+local StarterPack = game:GetService("StarterPack")
 local StarterPlayer = game:GetService("StarterPlayer")
 
 for _, old in pairs({ workspace:FindFirstChild("Grove"), ReplicatedStorage:FindFirstChild("GameState"),
 	ReplicatedStorage:FindFirstChild("Remotes"), ServerScriptService:FindFirstChild("GroveService"),
 	StarterGui:FindFirstChild("HUD"), StarterGui:FindFirstChild("Menu"),
-	StarterPlayer.StarterPlayerScripts:FindFirstChild("GroveControls") }) do
+	StarterPlayer.StarterPlayerScripts:FindFirstChild("GroveControls"), StarterPack:FindFirstChild("Torch") }) do
 	old:Destroy()
 end
 
@@ -135,6 +138,25 @@ posts.Parent = grove
 for i = 1, 3 do
 	part({ Name = "Post", Size = Vector3.new(1, 3, 1), Position = Vector3.new(8 + i * 3, 1.5, 4), Parent = posts })
 end
+
+-- The Lookout: a platform 9 studs high (higher than a jump) at x -64..-52, z -6..6, its only way up a Ramp rising
+-- toward -x from its foot at x -34 (18 studs on, 9 up: about 27 degrees), a Beacon on top
+part({ Name = "Lookout", Size = Vector3.new(12, 9, 12), Position = Vector3.new(-58, 4.5, 0),
+	Color = Color3.fromRGB(120, 120, 110), Material = Enum.Material.Slate, Parent = grove })
+local rampTilt = -math.atan2(9, 18)
+local rampCf = CFrame.new(-43, 4.5, 0) * CFrame.Angles(0, 0, rampTilt)
+part({ Name = "Ramp", Size = Vector3.new(math.sqrt(18 * 18 + 9 * 9), 1, 8), CFrame = rampCf * CFrame.new(0, -0.5, 0),
+	Color = Color3.fromRGB(150, 110, 70), Material = Enum.Material.WoodPlanks, Parent = grove })
+part({ Name = "Beacon", Size = Vector3.new(1, 3, 1), Position = Vector3.new(-60, 10.5, 0),
+	Color = Color3.fromRGB(80, 200, 255), Material = Enum.Material.Neon, CanCollide = false, Parent = grove })
+
+-- A Torch in every player's backpack (the hotbar's first: One equips it)
+local torch = Instance.new("Tool")
+torch.Name = "Torch"
+torch.CanBeDropped = false
+part({ Name = "Handle", Size = Vector3.new(0.4, 3, 0.4), Anchored = false, CanCollide = false,
+	Color = Color3.fromRGB(110, 70, 40), Parent = torch })
+torch.Parent = StarterPack
 grove.Parent = workspace
 
 local state = Instance.new("ModuleScript")
