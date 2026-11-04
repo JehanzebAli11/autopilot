@@ -57,17 +57,23 @@ and is never saved.
    `Autopilot/autopilot.env` (the plugin itself can't write files: the agent service does it for it, the `save_setup`
    frame). Keys left empty keep the ones the agent service has.
 4. **New run**: describe what to test in the prompt box and press **Run**. The words are sent as typed (a `start` frame
-   with `{"kind": "auto", "prompt": ..., "time_limit_minutes": ...}`); the agent service reads which of the four types
-   it is and the live page shows it (VERIFY, GOAL, EXPLORE, TEST). **Time limit** is the run's minutes in all (1-600,
-   30 by default), kept for the next run.
+   with `{"kind": "auto", "prompt": ..., "time_limit_minutes": ...}`, and `design_brief` when the Settings' **Design
+   brief** has words); the agent service reads which of the four types it is and the live page shows it (VERIFY, GOAL,
+   EXPLORE, TEST). **Time limit** is the run's minutes in all (1-600, 30 by default), kept for the next run.
 5. **Follow the run**: the stages (Launch, Analyze, Probe, Build harness, Play, Results, Report), the agent service's
-   status line, **Stop**, and **Steer** (a hint for the agent while the game plays, from the Play stage on). The
-   **Feed** lists what the agent did and said, by stage; **+ the details** opens a line's code, output or text.
+   status line (**Waiting for the game to start** while the run's play session comes up), **Stop**, and **Steer** (a
+   hint for the agent while the game plays, from the Play stage on). The **Feed** lists what the agent did and said, by
+   stage; **+ the details** opens a line's code, output or text.  The **Policy log** (unless **Show Policy Log** is
+   off), folded under its step count: the agent's policy steps in the game, one row each (step, game time, START,
+   KEEP, SWITCH, HELD or DROPPED, the action chosen, its probability, ms), the last 100 shown, following the newest
+   while scrolled to the bottom.
 6. **Read the result**: the verdict (CONFIRMED, DENIED, INCONCLUSIVE; ACHIEVED, NOT ACHIEVED; EXPLORED, GAME TESTED),
    the reason, the evidence, alerts, the direct changes the run made to the game, and the engine's findings (script
    errors on the server and the client, parts fallen out of the world, long falls, hitches, HUD counts over their
    maximum) with **Not a bug** and **Show in level** (selects it in the Explorer). **Run again**, **Report (to copy)**
-   (the report as text, selectable) and **Verify a fix** (fills the prompt box).
+   (the report as text, selectable) and **Verify a fix** (fills the prompt box).  **Usage**: the run's tokens per
+   model (the agent service's `usage` frames), kept with the run in the history.  (No ledger of more runs than the
+   history, as Godot's Settings page keeps: Studio's plugin settings are small.)
 
 **Studio needn't be in front while a run plays.** The plugin's keys, mouse, gamepad and touches go in through Studio's
 virtual input, which reaches the game whether or not Studio's game view is the focused window: work in another app
@@ -86,6 +92,9 @@ agent forget them.
 | **Agent service URL** | Where to connect. Empty means `ws://127.0.0.1:8765/v1/bridge`. A changed address is used at once. |
 | **Access token** · optional | Sent as `Authorization: Bearer <token>`, for an agent service that asks for one. |
 | **HTTP fallback URL** | Optional HTTP base URL (for example `http://127.0.0.1:9000/v1/http/` with `autopilot serve --http-port 9000`). Empty uses the WebSocket port plus one. Used by the editor and Play server; see the client limitation below. |
+| **Design brief** · optional | How the game is meant to work: its design, the rules players are told.  Explorations report what differs from it as a bug.  Sent with every run as the `start`'s `design_brief`, trimmed; kept as typed. |
+| **Research agent** | Whether the agent service runs its research agent during runs (the `hello`'s `research`): more difficult goals in fewer attempts, at a higher cost.  Unset until you flip it, and the `hello` leaves `research` out (the agent service decides: on for its own, off for the Aura app's); the switch shows on until then.  Sent again at once, for the next run. |
+| **Show Policy Log** | On by default: the Policy log, and the `hello`'s `inspect` (the agent service sends policy steps only when asked).  Sent again at once: applies to the run going on too. |
 | **Data sharing** | Synchronized with the agent service’s shared privacy preference before runs. Changes are saved for every editor; an existing opt-out is preserved. |
 
 ### Runs from your own Claude Code or Codex
@@ -298,7 +307,7 @@ All paths are under `plugin/roblox/`.
 |---|---|
 | `src/Main.luau` | The start: which DataModel this is (edit, server, client) and which parts run there. |
 | `src/Editor.luau` | The edit DataModel's link to the agent service: the hello, runs, `session` (play, stop, restart, on a device), `levels`, `device`, the codex, routing requests to the play session's sides, the account and setup frames. |
-| `src/Dock.luau` | The dock: connection, account (Aura sign-in, BYOK), memory, the composer, the live run (stages, Stop, Steer), the feed, the result, history, settings. |
+| `src/Dock.luau` | The dock: connection, account (Aura sign-in, BYOK), memory, the composer, the live run (stages, Stop, Steer), the Policy log, the feed, the result and its usage, history, settings. |
 | `src/Host.luau` | A play session's side joined to the pipe: requests answered in threads of their own, events once a frame, attach and detach. |
 | `src/Client.luau` | The client's ops: input (keys, holds, the mouse, the gamepad), touch, device, move, watch, view, screen, ui, pointer, find, transforms, pose, movement, context, pause, capture, record. |
 | `src/Server.luau` | The server's ops: rc, find, transforms, pause, ending the play session. |

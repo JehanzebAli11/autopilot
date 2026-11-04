@@ -1,8 +1,8 @@
 --!strict
 -- The Autopilot dock: a Studio widget (Plugins tab > Autopilot) to connect to the agent service, set up how runs go,
--- start a run from one prompt box, follow it (its stages, the activity feed, Stop, Steer) and read its result; the
--- run history and the memory line. It reads nothing from the prompt's words: the agent service says what kind of run
--- they ask for (its run_kind frame).
+-- start a run from one prompt box, follow it (its stages, the activity feed, the Policy log, Stop, Steer) and read its
+-- result (with its usage); the run history and the memory line. It reads nothing from the prompt's words: the agent
+-- service says what kind of run they ask for (its run_kind frame).
 local HttpService = game:GetService("HttpService")
 local Selection = game:GetService("Selection")
 local TextService = game:GetService("TextService")
@@ -30,6 +30,19 @@ local STAGE_NAMES = { launch = "Launch", analyze = "Analyze", probe = "Probe", b
 local MARKS = { text = "?", read = "R", search = "S", write = "W", probe = "P", episode = "E", look = "L",
 	report = "!", alert = "!", steer = ">", restart = "*", memory = "M" }
 local HISTORY = 30
+local WAITING_FOR_GAME = "Waiting for the game to start"
+-- The Policy log: a run's policy steps kept (the oldest go), and the rows shown of them
+local POLICY_KEPT = 300
+local POLICY_SHOWN = 100
+-- decided.summary's "<action>: <name>" -> the tag shown (as Godot's Policy log)
+local TAGS = { started = "START", kept = "KEEP", switched = "SWITCH", kept_running = "HELD", dropped = "DROPPED" }
+-- The Settings' words (as Godot's Settings page)
+local BRIEF_TEXT = "How the game is meant to work: its design, the rules players are told (e.g. “the player has three "
+	.. "lives; each coin is worth 10 points”). Explorations report what differs from it as a bug. Sent with every run."
+local RESEARCH_TEXT = "Enabling the research agent allows Autopilot to achieve more difficult goals with fewer "
+	.. "attempts, but at a higher cost. Applies from the next run."
+local POLICY_TEXT = "The Policy log: every step the agent took in the game (the action it chose, how likely it was). "
+	.. "Asked of the agent service at once."
 
 local function corner(parent: Instance, r: number?)
 	local c = Instance.new("UICorner")
@@ -172,6 +185,57 @@ local function esc(s: string): string
 	return (string.gsub(string.gsub(string.gsub(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"))
 end
 
+-- A policy step (the agent service's "jev" frame) as the Policy log shows it: {n, t, tag, chosen, p, ms}.
+local function policyStep(f: any): any
+	local decided = if type(f.decided) == "table" then f.decided else {}
+	local summary = tostring(decided.summary or "")
+	local action, rest = string.match(summary, "^(.-): (.*)$")
+	local chosen = ""
+	if type(decided.chosen) == "table" and decided.chosen[1] ~= nil then
+		chosen = tostring(decided.chosen[1])
+	elseif rest and rest ~= "None" then
+		chosen = rest
+	end
+	local p = nil
+	local out = f.output
+	if chosen ~= "" and type(out) == "table" and type(out.answers) == "table" and type(out.answers.pick) == "table" then
+		p = tonumber(out.answers.pick[chosen])
+	end
+	local secs = if type(f.seconds) == "table" then tonumber(f.seconds.jev) else nil
+	local tag = action or summary
+	return { n = tonumber(f.call) or tonumber(f.step) or 0, t = tonumber(f.t) or 0,
+		tag = TAGS[tag] or string.upper(tag), chosen = chosen, p = p, ms = if secs then secs * 1000 else nil }
+end
+
+-- A usage frame's models (each {kind, model, calls, input, output, cache_read, cache_write}), whole numbers only: small
+-- enough to keep with a run in the history.
+local function usageRows(models: any): { any }
+	local rows = {}
+	if type(models) ~= "table" then
+		return rows
+	end
+	for _, m in ipairs(models) do
+		if type(m) == "table" then
+			local row: any = { kind = if m.kind == "decision" then "decision" else "llm",
+				model = tostring(m.model or "") }
+			for _, k in ipairs({ "calls", "input", "output", "cache_read", "cache_write" }) do
+				row[k] = math.max(0, math.floor(tonumber(m[k]) or 0))
+			end
+			table.insert(rows, row)
+		end
+	end
+	return rows
+end
+
+local function tokens(n: number): string
+	if n >= 1e6 then
+		return string.format("%.1fM", n / 1e6)
+	elseif n >= 1e3 then
+		return string.format("%.1fk", n / 1e3)
+	end
+	return tostring(n)
+end
+
 function Dock.new(plugin: Plugin, editor: any, _options: any?)
 	local self = setmetatable({}, Dock) :: any
 	self.plugin = plugin
@@ -311,6 +375,19 @@ function Dock.new(plugin: Plugin, editor: any, _options: any?)
 	editor:on("playing", function()
 		self:_renderConnection()
 	end)
+	editor:on("policy", function(f)
+		self:_policyStep(f)
+	end)
+	editor:on("usage", function(models, final)
+		self:_usage(models, final)
+	end)
+	-- (the game coming up changes the live line with no frame from the agent service: Studio's play session starting,
+	-- Editor's `starting` and `playing`)
+	table.insert(self.conns, game:GetService("RunService").Heartbeat:Connect(function()
+		if self.run and not self.run.result and self:_waiting() ~= (self.waitingShown == true) then
+			self:_renderLive()
+		end
+	end))
 	self:_renderAll()
 	return self
 end
@@ -342,6 +419,9 @@ function Dock:_build()
 	self.live = frame(root, "Live", false, C.panel)
 	pad(self.live, 8)
 	corner(self.live, 8)
+	self.policyBox = frame(root, "PolicyLog", false, C.panel)
+	pad(self.policyBox, 8)
+	corner(self.policyBox, 8)
 	self.resultBox = frame(root, "Result", false, C.panel)
 	pad(self.resultBox, 8)
 	corner(self.resultBox, 8)
@@ -361,6 +441,7 @@ function Dock:_renderAll()
 	self:_renderMemory()
 	self:_renderComposer()
 	self:_renderLive()
+	self:_renderPolicy()
 	self:_renderResult()
 	self:_renderFeed()
 	self:_renderHistory()
@@ -640,7 +721,11 @@ function Dock:_renderComposer()
 		end
 		local n = math.clamp(math.floor(tonumber(minutes.Text) or 30), 1, 600)
 		Settings.set(self.plugin, "time_limit", n)
-		local run = { kind = "auto", prompt = words, time_limit_minutes = n }
+		local run: any = { kind = "auto", prompt = words, time_limit_minutes = n }
+		local brief = self:_brief()
+		if brief ~= "" then
+			run.design_brief = brief -- (how the game is meant to work: the Settings' Design brief)
+		end
 		if ed:startRun(run) then
 			self:_newRun(run, nil)
 		end
@@ -654,10 +739,26 @@ end
 function Dock:_newRun(run: any, by: string?)
 	self.run = { id = HttpService:GenerateGUID(false), prompt = run.prompt or run.claim or run.goal or run.brief or "",
 		kind = if run.kind ~= "auto" then run.kind else nil, started = os.time(), clock = os.clock(), events = {},
-		findings = {}, stage = "launch", by = by, time_limit = run.time_limit_minutes, lastEvent = 0 }
+		findings = {}, stage = "launch", by = by, time_limit = run.time_limit_minutes, lastEvent = 0, steps = {} }
 	self:_renderLive()
+	self:_renderPolicy()
 	self:_renderResult()
 	self:_renderFeed()
+end
+
+-- The Settings' Design brief as typed (kept as it is typed, saved here too should its box lose focus unseen), trimmed.
+function Dock:_brief(): string
+	if self.briefText ~= nil then
+		Settings.set(self.plugin, "design_brief", self.briefText)
+	end
+	local text = tostring(self.briefText or Settings.get(self.plugin, "design_brief") or "")
+	return string.match(text, "^%s*(.-)%s*$") or ""
+end
+
+-- A run's play session is starting (Studio asked to play, its client not attached yet).
+function Dock:_waiting(): boolean
+	local ed = self.editor
+	return ed.runActive and ed.starting and not ed.playing
 end
 
 function Dock:_activity(f: any)
@@ -710,8 +811,11 @@ function Dock:_renderLive()
 		end
 	end
 	label(l, table.concat(track, "  ›  "), { rich = true, size = 13 })
-	if run.statusLine then
-		label(l, run.statusLine, { color = C.muted, size = 14 })
+	-- (as Godot's: while the run's play session is starting, "Waiting for the game to start"; else the status line)
+	self.waitingShown = self:_waiting()
+	local now = if self.waitingShown then WAITING_FOR_GAME else run.statusLine
+	if now then
+		label(l, now, { color = if self.waitingShown then C.warn else C.muted, size = 14, name = "Now" })
 	end
 	local row = frame(l, "Row", true)
 	button(row, "Stop", function()
@@ -807,6 +911,137 @@ function Dock:_renderFeed()
 	end
 end
 
+-- --- the Policy log ------------------------------------------------------------------------------------------------
+
+-- A policy step's row: "#12  0:34  SWITCH  JumpGap · 62% · 40 ms".
+local function policyRow(parent: Instance, st: any): TextLabel
+	local text = string.format('<font color="#9a9a9a">#%d  %s</font>  <b>%s</b>  %s', st.n, mmss(st.t), esc(st.tag),
+		esc(st.chosen))
+	if st.p then
+		text ..= string.format(" · %d%%", math.floor(st.p * 100 + 0.5))
+	end
+	if st.ms then
+		text ..= string.format(' <font color="#9a9a9a">· %d ms</font>', math.floor(st.ms + 0.5))
+	end
+	return label(parent, text, { rich = true, size = 13, font = MONO })
+end
+
+-- The Policy log (Settings' Show Policy Log): the shown run's policy steps, folded under its header (its count), open a
+-- list of the last POLICY_SHOWN that follows the newest while scrolled to the bottom.
+function Dock:_renderPolicy()
+	local box = self.policyBox
+	clear(box)
+	self.policyList, self.policyRows = nil, {}
+	local run = self.run
+	local steps = if run then run.steps else nil
+	if Settings.get(self.plugin, "show_policy_log") == false or steps == nil or #steps == 0 then
+		box.Visible = false
+		return
+	end
+	box.Visible = true
+	local head = Instance.new("TextButton")
+	head.Name = "Header"
+	head.BackgroundTransparency = 1
+	head.FontFace = MONO
+	head.TextSize = 12
+	head.TextColor3 = C.muted
+	head.TextXAlignment = Enum.TextXAlignment.Left
+	head.Size = UDim2.new(1, 0, 0, 18)
+	head.LayoutOrder = nextOrder()
+	head.Parent = box
+	self.policyHeader = head
+	head.MouseButton1Click:Connect(function()
+		self.policyOpen = not self.policyOpen
+		self:_renderPolicy()
+	end)
+	self:_policyHeader()
+	if not self.policyOpen then
+		return
+	end
+	local sc = Instance.new("ScrollingFrame")
+	sc.Name = "Steps"
+	sc.BackgroundColor3 = C.field
+	sc.BorderSizePixel = 0
+	sc.Size = UDim2.new(1, 0, 0, 220)
+	sc.CanvasSize = UDim2.new(0, 0, 0, 0)
+	sc.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	sc.ScrollBarThickness = 6
+	sc.ScrollingDirection = Enum.ScrollingDirection.Y
+	sc.LayoutOrder = nextOrder()
+	pad(sc, 4)
+	list(sc, 2)
+	sc.Parent = box
+	self.policyList = sc
+	for i = math.max(1, #steps - POLICY_SHOWN + 1), #steps do
+		table.insert(self.policyRows, policyRow(sc, steps[i]))
+	end
+	task.defer(function()
+		sc.CanvasPosition = Vector2.new(0, sc.AbsoluteCanvasSize.Y)
+	end)
+end
+
+function Dock:_policyHeader()
+	local steps = if self.run then self.run.steps or {} else {}
+	if self.policyHeader then
+		self.policyHeader.Text = string.format("%s POLICY LOG · %d step%s", if self.policyOpen then "▾" else "▸",
+			#steps, if #steps == 1 then "" else "s")
+	end
+end
+
+-- A policy step from the agent service (the Editor's "policy": its "jev" frames, sent while the hello's `inspect`).
+function Dock:_policyStep(f: any)
+	local run = self.run
+	if run == nil or run.result or type(f) ~= "table" then
+		return
+	end
+	run.steps = run.steps or {}
+	table.insert(run.steps, policyStep(f))
+	if #run.steps > POLICY_KEPT then
+		table.remove(run.steps, 1)
+	end
+	if not self.policyBox.Visible then
+		self:_renderPolicy()
+		return
+	end
+	self:_policyHeader()
+	local sc = self.policyList
+	if sc == nil or sc.Parent == nil then
+		return
+	end
+	local atBottom = sc.CanvasPosition.Y + sc.AbsoluteWindowSize.Y >= sc.AbsoluteCanvasSize.Y - 8
+	table.insert(self.policyRows, policyRow(sc, run.steps[#run.steps]))
+	while #self.policyRows > POLICY_SHOWN do
+		table.remove(self.policyRows, 1):Destroy()
+	end
+	if atBottom then
+		task.defer(function()
+			sc.CanvasPosition = Vector2.new(0, sc.AbsoluteCanvasSize.Y)
+		end)
+	end
+end
+
+-- --- usage ---------------------------------------------------------------------------------------------------------
+
+-- A usage frame: the run's token counts so far (each replaces the one before), shown with its result and kept in the
+-- history with it. (Not a ledger of many runs, as Godot's Settings page keeps: Studio's plugin settings are small.)
+function Dock:_usage(models: any, final: boolean)
+	local run = self.run
+	if run == nil or (run.result and not run.saved) then
+		return -- (no run, or one of the history's shown)
+	end
+	run.usage = usageRows(models)
+	if run.result then
+		-- (the final count can come after the result)
+		if run.saved then
+			run.saved.usage = run.usage
+			if final then
+				Settings.set(self.plugin, "history", self.history)
+			end
+		end
+		self:_renderResult()
+	end
+end
+
 -- The report as markdown (the Result's words), for the user to copy from the box.
 local function markdown(run: any): string
 	local r = run.result or {}
@@ -849,7 +1084,8 @@ function Dock:_result(result: any)
 	run.seconds = math.floor(os.clock() - (run.clock or os.clock()))
 	local saved = { prompt = run.prompt, kind = run.kind, tested = run.tested, started = run.started,
 		seconds = run.seconds,
-		result = result, findings = run.findings, events = {} }
+		result = result, findings = run.findings, events = {}, usage = run.usage }
+	run.saved = saved
 	-- (the feed's lines without their details: plugin settings are kept small)
 	for _, e in ipairs(run.events) do
 		table.insert(saved.events, { id = e.id, t = e.t, stage = e.stage, kind = e.kind, text = e.text, ends = e.ends })
@@ -917,6 +1153,16 @@ function Dock:_renderResult()
 	if r.memory and type(r.memory) == "table" and r.memory.updated then
 		label(box, "Memory updated", { size = 13, color = C.good })
 	end
+	if type(run.usage) == "table" and #run.usage > 0 then
+		label(box, "USAGE", { font = MONO, size = 12, color = C.muted })
+		for _, m in ipairs(run.usage) do
+			local cached = (m.cache_read or 0) + (m.cache_write or 0)
+			label(box, string.format("%s%s · %d call%s · %s in · %s out%s", if m.kind == "decision" then "Decision · "
+				else "", tostring(m.model), m.calls or 0, if m.calls == 1 then "" else "s", tokens(m.input or 0),
+				tokens(m.output or 0), if cached > 0 then " · " .. tokens(cached) .. " cached" else ""),
+				{ size = 13, color = C.muted })
+		end
+	end
 	local findings = run.findings or {}
 	if #findings > 0 then
 		label(box, string.format("ENGINE FINDINGS · %d", #findings), { font = MONO, size = 12, color = C.muted })
@@ -958,8 +1204,12 @@ function Dock:_renderResult()
 				else "Not connected: connect first")
 			return
 		end
-		local again = { kind = "auto", prompt = run.prompt, time_limit_minutes = run.time_limit or Settings.get(self.plugin,
-			"time_limit") }
+		local again: any = { kind = "auto", prompt = run.prompt, time_limit_minutes = run.time_limit
+			or Settings.get(self.plugin, "time_limit") }
+		local brief = self:_brief()
+		if brief ~= "" then
+			again.design_brief = brief
+		end
 		if ed:startRun(again) then
 			self:_newRun(again, nil)
 		end
@@ -1028,7 +1278,9 @@ function Dock:_renderHistory()
 				return
 			end
 			self.run = { prompt = run.prompt, kind = run.kind, tested = run.tested, started = run.started,
-				seconds = run.seconds, result = run.result, findings = run.findings or {}, events = run.events or {} }
+				seconds = run.seconds, result = run.result, findings = run.findings or {}, events = run.events or {},
+				usage = run.usage }
+			self:_renderPolicy()
 			self:_renderResult()
 			self:_renderFeed()
 		end)
@@ -1058,6 +1310,40 @@ function Dock:_renderSettings()
 	httpUrl.FocusLost:Connect(apply)
 	url.FocusLost:Connect(apply)
 	token.FocusLost:Connect(apply)
+	-- Design brief: sent with every run the dock starts (the start's `design_brief`)
+	label(s, "Design brief", { size = 14 })
+	local brief = input(s, "Optional", { multiline = true, height = 78, name = "DesignBrief",
+		text = self.briefText or Settings.get(self.plugin, "design_brief") or "" })
+	brief:GetPropertyChangedSignal("Text"):Connect(function()
+		self.briefText = brief.Text
+	end)
+	brief.FocusLost:Connect(function()
+		Settings.set(self.plugin, "design_brief", brief.Text)
+	end)
+	label(s, BRIEF_TEXT, { color = C.muted, size = 13 })
+	-- Research agent: the hello's `research`, once flipped (until then the switch shows the agent service's own
+	-- default, on, as Godot's does without Use with Aura)
+	local chosen = Settings.get(self.plugin, "research")
+	local research = if type(chosen) == "boolean" then chosen else true
+	local rrow = frame(s, "Research", true)
+	label(rrow, "Research agent", { width = 0, size = 14 })
+	button(rrow, if research then "Research agent on" else "Research agent off", function()
+		Settings.set(self.plugin, "research", not research)
+		self.editor:helloChanged()
+		self:_renderSettings()
+	end)
+	label(s, RESEARCH_TEXT, { color = C.muted, size = 13 })
+	-- Show Policy Log: the Policy log, and the hello's `inspect`
+	local policy = Settings.get(self.plugin, "show_policy_log") ~= false
+	local prow = frame(s, "PolicyLog", true)
+	label(prow, "Show Policy Log", { width = 0, size = 14 })
+	button(prow, if policy then "Policy log shown" else "Policy log hidden", function()
+		Settings.set(self.plugin, "show_policy_log", not policy)
+		self.editor:helloChanged()
+		self:_renderPolicy()
+		self:_renderSettings()
+	end)
+	label(s, POLICY_TEXT, { color = C.muted, size = 13 })
 	local row = frame(s, "Share", true)
 	local share = Settings.get(self.plugin, "share") ~= false
 	label(row, "Share runs to improve Autopilot", { width = 0, size = 14 })

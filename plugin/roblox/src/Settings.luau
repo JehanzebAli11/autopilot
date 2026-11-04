@@ -11,6 +11,10 @@ local DEFAULTS = {
 	share = false, -- share runs' data to improve Autopilot (the hello's `share`)
 	time_limit = 30, -- the composer's Time limit, in minutes
 	autoconnect = true, -- connect when a place opens
+	design_brief = "", -- how the game is meant to work, sent with every run the dock starts (the start's design_brief)
+	show_policy_log = true, -- the dock's Policy log and the policy steps asked of the agent service (hello `inspect`)
+	-- research: nil until the user flips the Research agent switch, then a boolean (the hello's `research`; left out,
+	-- the agent service decides)
 }
 
 local function key(name: string): string

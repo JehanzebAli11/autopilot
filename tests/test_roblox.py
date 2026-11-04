@@ -507,3 +507,30 @@ def test_the_plugin_speaks_the_protocol_as_the_other_plugins():
     assert '"find: no class, tag or script named "' in world and "return false, why, 400" in client
     assert "function World.activeOf(inst: Instance): boolean" in world
     assert world.count("active = active") == 2 and "location = Json.null" in world
+
+
+def test_the_dock_sends_the_design_brief_research_and_inspect():
+    """As Godot's dock: the Settings' Design brief in every run's start (`design_brief`), Show Policy Log as the hello's
+    `inspect` and the Research agent switch as its `research` (only once chosen), the hello sent again when either
+    changes; the Policy log of the "policy" events, the run's usage, and "Waiting for the game to start"."""
+    sources = _sources()
+    settings, dock, editor = sources["Settings"], sources["Dock"], sources["Editor"]
+    defaults = settings[settings.index("local DEFAULTS"):]
+    defaults = defaults[:defaults.index("\n}\n")]
+    assert '\tdesign_brief = "",' in defaults and "\tshow_policy_log = true," in defaults
+    assert "\tresearch =" not in defaults  # (unset until the user chooses: the agent service decides)
+    assert dock.count("design_brief = brief") == 2  # (the composer's run and Run again)
+    assert 'local run: any = { kind = "auto", prompt = words, time_limit_minutes = n }' in dock
+    hello = editor[editor.index("function Editor:_hello()"):]
+    hello = hello[:hello.index("\nend\n")]
+    assert 'inspect = Settings.get(self.plugin, "show_policy_log") ~= false' in hello and "inspect = true" not in hello
+    assert 'local research = Settings.get(self.plugin, "research")' in hello
+    assert 'if type(research) == "boolean" then\n\t\th.research = research' in hello
+    assert "function Editor:helloChanged()" in editor and dock.count("self.editor:helloChanged()") == 2
+    for setting in ('Settings.set(self.plugin, "research", not research)',
+                    'Settings.set(self.plugin, "show_policy_log", not policy)',
+                    'Settings.set(self.plugin, "design_brief", brief.Text)'):
+        assert setting in dock, setting
+    assert 'editor:on("policy"' in dock and 'editor:on("usage"' in dock
+    assert "POLICY_KEPT = 300" in dock and "POLICY_SHOWN = 100" in dock
+    assert '"Waiting for the game to start"' in dock and "ed.runActive and ed.starting and not ed.playing" in dock
