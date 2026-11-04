@@ -514,13 +514,14 @@ class Studio:
         return "studio_id" in (schema.get("required") or [])
 
     def studios(self):
-        """[(id, name)] of the Studios the server is connected to: list_roblox_studios, {"studios": [{"id", "name"}]}
-        on the live server."""
+        """[(id, name)] of the Studios the server is connected to with a place open: list_roblox_studios,
+        {"studios": [{"id", "name"}]} on the live server, where a Studio window without a place (its start page)
+        has the name null and answers every tool "Place is not open"."""
         found = parse_json(text_of(self.call(LIST_ROBLOX_STUDIOS, {})))
         studios = found if isinstance(found, list) else (found or {}).get("studios") if isinstance(found, dict) else []
         studios = [s for s in studios or [] if isinstance(s, dict)]
         out = [(str(s.get("id") or s.get("studio_id") or s.get("studioId") or ""), str(s.get("name") or ""))
-               for s in studios]
+               for s in studios if not ("name" in s and not s["name"])]
         return [(i, n) for i, n in out if i]
 
     def pick_studio(self, wait=STUDIO_WAIT):

@@ -313,8 +313,11 @@ class Roblox(OpEngine):
 
     def launch_command(self, project, url, log, map=None, exe=None):
         """Not a headless game: the connector, which plays the place open in Roblox Studio (Studio must be open on it,
-        with its MCP server on) and connects to the brain at url as a plugin would. exe: the Python to run it with."""
-        cmd = [exe or sys.executable, "-m", "autopilot.engines.roblox", "connect", "--url", url, "--log", log]
+        with its MCP server on) and connects to the brain at url as a plugin would. exe: the Python to run it with.
+        Studio's whole console goes to console.txt beside the log (the bench keeps it with each prompt)."""
+        console = os.path.join(os.path.dirname(os.path.abspath(log)), "console.txt")
+        cmd = [exe or sys.executable, "-m", "autopilot.engines.roblox", "connect", "--url", url, "--log", log,
+               "--console", console]
         if project:
             cmd += ["--project", project]
         return cmd
@@ -473,8 +476,9 @@ class StudioBackend:
     Values it answers are in the kit's frame where the protocol says so (find, transforms, pose, movement, view) and
     Roblox's own for rc (game.get / game.set: studs, Roblox's axes)."""
 
-    def __init__(self, studio, project=None, emit=None):
+    def __init__(self, studio, project=None, emit=None, console_file=None):
         self.studio = studio  # a roblox_mcp.Studio
+        self.console_file = console_file  # a path every line of Studio's console is also appended to (--console)
         self.engine = Roblox()
         self.project = project  # the Rojo project folder or place file on this machine, if known
         self.emit = emit or (lambda event: None)  # events for the brain: log lines, findings
@@ -1058,6 +1062,11 @@ class StudioBackend:
             new = [line for line in text.splitlines() if line not in seen]
         self.console_text = text
         self.console_seen = (self.console_seen + new)[-2000:]
+        kept = [line for line in new if line.strip()]
+        if self.console_file and kept:
+            # (Studio keeps only the end of its console: this keeps all of it. A line can come twice, after a restart)
+            with open(self.console_file, "a", encoding="utf-8") as f:
+                f.write("\n".join(kept) + "\n")
         n = 0
         for line in new:
             line = line.strip()
@@ -1504,7 +1513,8 @@ def default_url():
 
 
 def main(argv=None):
-    """python -m autopilot.engines.roblox connect [--url ws://...] [--project PATH] [--no-share] [--log FILE]"""
+    """python -m autopilot.engines.roblox connect [--url ws://...] [--project PATH] [--no-share] [--log FILE]
+    [--console FILE]"""
     import argparse
 
     ap = argparse.ArgumentParser(prog="python -m autopilot.engines.roblox",
@@ -1517,6 +1527,7 @@ def main(argv=None):
     c.add_argument("--no-share", action="store_true", help="say in the hello that runs' data isn't shared")
     c.add_argument("--log", help="also write what the connector says to this file")
     c.add_argument("--retry", type=float, default=30.0, help="seconds to keep trying to reach the brain")
+    c.add_argument("--console", help="also append every line of Studio's console (its Output) to this file")
     args = ap.parse_args(argv)
     from websockets.sync.client import connect
 
@@ -1539,7 +1550,7 @@ def main(argv=None):
     lacking = studio.check()
     for tool, why in lacking.items():
         log(f"note: Studio's MCP server has no {tool}: {why}")
-    backend = StudioBackend(studio, project)
+    backend = StudioBackend(studio, project, console_file=args.console)
     name = Roblox().project_name(project) if project else None
     url = args.url or default_url()
     deadline = time.monotonic() + args.retry
