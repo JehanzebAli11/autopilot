@@ -83,6 +83,8 @@ autopilot play "Verify that ..."             # run one prompt when the plugin co
 autopilot codex --project path/to/Game       # build a project's codex without the game running
 autopilot run memory/<project>/runs/<run>/harness.py --seconds 90   # replay a saved harness (no language model)
 autopilot regress --project path/to/Game     # replay every CONFIRMED verification, no language model
+autopilot evolve --suite <suite> --project path/to/Game --candidates <file>
+                                             # keep a change only if a locked suite does better
 autopilot login | logout                     # sign in to Aura on its website (without the Aura app), or out again
 autopilot connect claude|codex [--remove]    # set up your own Claude Code or Codex to playtest through Autopilot,
                                              # on your own plan (its MCP server, `autopilot mcp`; a skill; a describer)
@@ -165,6 +167,7 @@ The variables:
 | `autopilot/vision.py`                                                                          | describes the game's frames for a request about how something looks                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `autopilot/runtime.py`                                                                         | plays a harness: asks Jev, runs the chosen action, writes the trace                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `autopilot/regress.py`                                                                         | regression replay: keeps each CONFIRMED verification's harness and plays it again without a language model (`autopilot regress`)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `autopilot/evolve.py`                                                                          | `autopilot evolve`: one change at a time to the prompt, the kit's reference, a constant or lib.py, kept only if a locked bench suite does better                                                                                                                                                                                                                                                                                                                                                                          |
 | `autopilot/kit/`                                                                               | what harnesses are written with: game reads and inputs, controllers (`walk_to`, `look_at`, ...), the `Harness` contract                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `autopilot/KIT.md`                                                                             | the kit's reference, as the agent reads it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `autopilot/codex.py`                                                                           | builds a project's codex (its code and assets as text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -225,6 +228,36 @@ The agent's instructions (`autopilot/agents/session.py`, `SYSTEM`) and the kit's
 well Autopilot plays. Changes to them are judged by results: describe in the pull request which games and prompts you ran
 before and after, and how the outcomes changed. `bench/run_autopilot.py` runs a suite of prompts against a headless copy of
 a game. Report results on games you didn't tune the change on.
+
+## Evolve
+
+`autopilot evolve` searches for such changes for you, in the manner of autoresearch: one change at a time, measured on a
+locked bench suite, kept only when the suite does better, everything logged.
+
+```bash
+autopilot evolve --show "prompt:Rules"            # what a target holds now
+autopilot evolve --suite bench/example.json --project path/to/Game --candidates experiments.json [--parallel 2]
+    [--repeats 2] [--regressions memory/<project>/regressions] [--out bench/evolve]
+autopilot evolve --suite bench/example.json --project path/to/Game --target "kit:The plan" --propose 5
+```
+
+- **Targets**, one per experiment: `prompt:<n or first words>` (a paragraph of `SYSTEM`), `kit:<heading>` (a section of
+  KIT.md), `const:<module.NAME>` (a module-level constant, e.g. `const:kit.control.SONAR_EVERY`), `lib:<function>` (a
+  function of the project's lib.py); `@file` names another file. A change is checked before it runs (the prompt keeps its
+  `{format}` fields, a constant's value is a literal, the file compiles), and nothing under `bench/`, `tests/` or a
+  regressions folder can be one.
+- **The decision**: each experiment runs the suite (`bench/run_autopilot.py`, `--parallel` prompts at a time, averaged
+  over `--repeats`) and keeps the change only when the pass rate rises, or, at an equal pass rate, time or tokens fall by
+  `--min-gain` (2%) without the other rising as much. With `--regressions`, a change that makes a regression fail that
+  passed before is reverted too. Otherwise the file is put back byte for byte.
+- **The changes** come from a candidates file (`{"experiments": [{"target", "text" | "file", "note"}]}`) or from a model
+  (`--target ... --propose N`), shown the target, the suite's misses and what was tried on it before.
+- **The log**, in `--out` (default `bench/evolve/`): `experiments.jsonl` and `experiments.md` (a row each: the target, the
+  diff, the metrics before and after, the decision and why) and `diffs/`. The suite's hash is locked in `suite.lock` on
+  the first run: a changed suite is refused (`--relock` starts a new lock).
+- **Safety**: files are written in one step; Ctrl+C puts the target back at once, and an experiment the loop was killed
+  in is put back when it next starts. Kept changes stay in the working tree as ordinary edits: review them, and report
+  results on games the suite didn't tune them on, as above.
 
 ## Adding an engine
 
