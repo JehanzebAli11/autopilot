@@ -84,6 +84,7 @@ autopilot serve                              # run what the editor's Autopilot t
 autopilot play "Verify that ..."             # run one prompt when the plugin connects, exit with its result
 autopilot codex --project path/to/Game       # build a project's codex without the game running
 autopilot run memory/<project>/runs/<run>/harness.py --seconds 90   # replay a saved harness (no language model)
+autopilot regress --project path/to/Game     # replay every CONFIRMED verification, no language model
 autopilot login | logout                     # sign in to Aura on its website (without the Aura app), or out again
 autopilot connect claude|codex [--remove]    # set up your own Claude Code or Codex to playtest through Autopilot,
                                              # on your own plan (its MCP server, `autopilot mcp`; a skill; a describer)
@@ -148,6 +149,7 @@ The variables:
 | `AUTOPILOT_TURNS`                                        | none                                                                                                            | Claude Code only: the most turns per prompt (without it, the run's time limit is what ends the run)                                                                                                                          |
 | `AUTOPILOT_SANDBOX`                                      | `auto`                                                                                                          | where model-written code runs: `auto`, `bwrap`, `process` or `off`                                                                                                                                                           |
 | `AUTOPILOT_MEMORY`                                       | `memory/` in the repository (installed: `Autopilot/memory` in your user settings folder)                        | where Autopilot keeps what it learns about each game                                                                                                                                                                         |
+| `AUTOPILOT_REGRESSIONS`                                  | each project's memory: `memory/<project>/regressions/`                                                          | where CONFIRMED verifications are kept as regressions (`<it>/<project>/<run>/`): see [Regression replay](#regression-replay)                                                                                                 |
 | `AUTOPILOT_SHARE`                                        | `1`                                                                                                             | `0`: never share runs' data, whatever the plugin says                                                                                                                                                                        |
 | `AUTOPILOT_TRAINING_URL`                                 | Aura's                                                                                                          | where shared runs' data is sent                                                                                                                                                                                              |
 | `AUTOPILOT_INSPECT`                                      | (off)                                                                                                           | `1` sends each decision to an editor's policy log even when the editor is on another machine                                                                                                                                 |
@@ -164,6 +166,7 @@ The variables:
 | `autopilot/mcp.py`, `autopilot/connect.py`, `autopilot/assistants/`                            | `autopilot mcp`, `autopilot connect` and the skill it installs                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `autopilot/vision.py`                                                                          | describes the game's frames for a request about how something looks                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `autopilot/runtime.py`                                                                         | plays a harness: asks Jev, runs the chosen action, writes the trace                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `autopilot/regress.py`                                                                         | regression replay: keeps each CONFIRMED verification's harness and plays it again without a language model (`autopilot regress`)                                                                                                                                                                                                                                                                                                                                                                                          |
 | `autopilot/kit/`                                                                               | what harnesses are written with: game reads and inputs, controllers (`walk_to`, `look_at`, ...), the `Harness` contract                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `autopilot/KIT.md`                                                                             | the kit's reference, as the agent reads it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `autopilot/codex.py`                                                                           | builds a project's codex (its code and assets as text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -195,6 +198,28 @@ message or a request must keep working with all three plugins.
   plugin's own tests (see its README).
 - **Don't break the protocol.** The protocol is versioned (`protocol: 1`); add optional fields rather than changing
   existing ones.
+
+## Regression replay
+
+When a run reports a claim CONFIRMED (`agents/session.py`, `finish`), the harness of the episode that showed it is kept
+as a regression: `memory/<project>/regressions/<run>/` (or under `AUTOPILOT_REGRESSIONS`) holds the harness, a snapshot of
+the project's lib.py, and `regression.json` (the claim, the episode's end state and evidence, and Jev's picks in order).
+Only an episode that started from a restarted level is kept: one that went on from where an earlier one left play needs
+state a replay can't rebuild.
+
+```bash
+autopilot regress --project path/to/Game      # starts the game headless, replays every regression of the project
+autopilot regress --no-launch                 # waits for the editor's plugin instead
+autopilot regress --project path/to/Game --regressions <folder> --json results.json
+```
+
+A replay restarts the level and plays the saved harness through the runtime, as an episode does, but its decisions come
+from the recorded picks (`regress.ReplayJev`): no agent and no Jev are called. It passes when the episode ends in the
+recorded state with the same evidence (booleans, strings and None equal; numbers within the regression's `tolerance`,
+0.25 relative by default), and says why when it doesn't (`ended running (...), not done`, `evidence differs: coins: 1
+then, 2 now`). It imports the project's lib.py as it is now, so a change to lib.py that breaks an old verification shows
+(`--frozen-lib`: each regression's own snapshot). `--seconds` caps each episode (default 1.5x the recorded one, at least
+20 s). The command exits 0 when every regression passes, 1 otherwise.
 
 ## Changing the agent's instructions
 

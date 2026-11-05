@@ -2027,6 +2027,13 @@ def finish(session, started, stopped, last_text, **facts):
         report["reading_usage"] = session.reader.model.tokens
     with open(os.path.join(session.run_dir, "report.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=1)
+    # A CONFIRMED claim's harness is kept as a regression that plays again without a model (autopilot/regress.py)
+    if str(report.get("outcome") or "").strip().upper() == "CONFIRMED":
+        from .. import regress
+
+        kept = regress.save_from_session(session, report)
+        if kept:
+            session.note(f"kept as a regression: {kept}")
     # The codex this run worked from: the next run is told what changed since. Only a run that played or reported
     # counts, so changes a run stopped (or crashed) before it worked on them are told to the next one. A named change
     # this run was told of is checked once the passages naming it were edited (or none names it any more); the rest
