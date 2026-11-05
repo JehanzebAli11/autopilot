@@ -1,5 +1,5 @@
 --!nocheck
--- Autopilot's reads of a Roblox place, run through Studio's execute_luau (autopilot/engines/roblox.py). The brain sends
+-- Autopilot's reads of a Roblox place, run through Studio's execute_luau (autopilot/engines/roblox_connector.py). The brain sends
 -- this prelude with a request (REQ, appended after it: {ops = {{op, args}...}, player, nonce, echo}); each op is one
 -- function of O below, run under pcall, and the answers come back as one JSON string, the chunk's return value (and
 -- printed between the nonce markers when REQ.echo is set). Values are Roblox's own (studs, Roblox's axes): the brain

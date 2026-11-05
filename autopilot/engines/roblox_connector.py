@@ -1,7 +1,7 @@
-"""Roblox, through Roblox Studio's built-in MCP server ("StudioMCP", engines/roblox_mcp.py): Route A. Roblox has no
-Autopilot plugin of its own; a connector process (`python -m autopilot.engines.roblox connect`) stands in for one. It
-connects out to the brain over the bridge's WebSocket like the other plugins, says hello as engine "roblox", and answers
-the protocol's requests (docs/protocol.md) by calling Studio's MCP tools:
+"""Roblox, through Roblox Studio's built-in MCP server ("StudioMCP", engines/roblox_mcp.py): Route A, the engine
+"roblox-mcp". No Autopilot plugin runs inside Studio: a connector process (`python -m autopilot.engines.roblox_connector
+connect`) stands in for one. It connects out to the brain over the bridge's WebSocket like the other plugins, says hello
+as engine "roblox-mcp", and answers the protocol's requests (docs/protocol.md) by calling Studio's MCP tools:
 
 - reads (context, find, transforms, pose, movement, rc, screen, ui, view) are Luau ops (engines/roblox.luau) run with
   execute_luau; the requests that come in together (a harness's game.batch in observe()) are coalesced into ONE
@@ -161,9 +161,9 @@ def script_file(path, cls):
     return "place/" + "/".join(parts) + suffix
 
 
-class Roblox(OpEngine):
-    name = "roblox"
-    title = "Roblox"
+class RobloxMcp(OpEngine):
+    name = "roblox-mcp"
+    title = "Roblox"  # (in the prompt: "a video game made in Roblox")
     # (the connector keeps nothing in the project: its export of the live place is only in the codex)
     export_dir = None
     plugin_files = ()
@@ -316,7 +316,7 @@ class Roblox(OpEngine):
         with its MCP server on) and connects to the brain at url as a plugin would. exe: the Python to run it with.
         Studio's whole console goes to console.txt beside the log (the bench keeps it with each prompt)."""
         console = os.path.join(os.path.dirname(os.path.abspath(log)), "console.txt")
-        cmd = [exe or sys.executable, "-m", "autopilot.engines.roblox", "connect", "--url", url, "--log", log,
+        cmd = [exe or sys.executable, "-m", "autopilot.engines.roblox_connector", "connect", "--url", url, "--log", log,
                "--console", console]
         if project:
             cmd += ["--project", project]
@@ -479,7 +479,7 @@ class StudioBackend:
     def __init__(self, studio, project=None, emit=None, console_file=None):
         self.studio = studio  # a roblox_mcp.Studio
         self.console_file = console_file  # a path every line of Studio's console is also appended to (--console)
-        self.engine = Roblox()
+        self.engine = RobloxMcp()
         self.project = project  # the Rojo project folder or place file on this machine, if known
         self.emit = emit or (lambda event: None)  # events for the brain: log lines, findings
         self.running = None  # whether a play session runs (None: not known yet)
@@ -1295,7 +1295,7 @@ def to_jpeg(data, max_dim=1280, quality=80):
 def hello(backend, project_name=None, share=None):
     """The hello the connector says (as a plugin's: docs/protocol.md)."""
     has = backend.studio.has
-    h = {"type": "hello", "protocol": 1, "engine": "roblox", "plugin_version": "roblox-mcp-0.1",
+    h = {"type": "hello", "protocol": 1, "engine": "roblox-mcp", "plugin_version": "roblox-mcp-0.1",
          "project": project_name or backend.place_name(), "host": "editor",
          "features": ["levels", "pointer"] + (["media"] if has(mcp.SCREEN_CAPTURE) else []),
          "input": {"notes": INPUT_NOTES, "keys": has(mcp.USER_KEYBOARD_INPUT)},
@@ -1513,11 +1513,11 @@ def default_url():
 
 
 def main(argv=None):
-    """python -m autopilot.engines.roblox connect [--url ws://...] [--project PATH] [--no-share] [--log FILE]
+    """python -m autopilot.engines.roblox_connector connect [--url ws://...] [--project PATH] [--no-share] [--log FILE]
     [--console FILE]"""
     import argparse
 
-    ap = argparse.ArgumentParser(prog="python -m autopilot.engines.roblox",
+    ap = argparse.ArgumentParser(prog="python -m autopilot.engines.roblox_connector",
                                  description="Play the place open in Roblox Studio for Autopilot, through Studio's "
                                              "built-in MCP server (stands in for a plugin).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1539,7 +1539,7 @@ def main(argv=None):
             out.write(text + "\n")
             out.flush()
 
-    project = Roblox().project_at(args.project) if args.project else None
+    project = RobloxMcp().project_at(args.project) if args.project else None
     if args.project and not project:
         log(f"note: no Rojo project or place file at {args.project}: playing what Studio has open")
     try:
@@ -1551,7 +1551,7 @@ def main(argv=None):
     for tool, why in lacking.items():
         log(f"note: Studio's MCP server has no {tool}: {why}")
     backend = StudioBackend(studio, project, console_file=args.console)
-    name = Roblox().project_name(project) if project else None
+    name = RobloxMcp().project_name(project) if project else None
     url = args.url or default_url()
     deadline = time.monotonic() + args.retry
     while True:

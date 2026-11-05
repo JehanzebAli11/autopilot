@@ -1,6 +1,6 @@
 """How long a round trip to a Roblox place takes through Roblox Studio's built-in MCP server, and so how fast a harness
 can play it: N execute_luau calls in play mode, each the engine's own batched observe (a pose, a few transforms and
-reads in one call, as engines/roblox.py sends a game.batch), timed one after another.
+reads in one call, as engines/roblox_connector.py sends a game.batch), timed one after another.
 
     python tools/roblox_latency.py [--calls 100] [--datamodel Client] [--no-start] [--ops 4]
     python tools/roblox_latency.py --tools      # what the server offers: tools/list, with each tool's input schema
@@ -24,7 +24,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from autopilot.engines import roblox  # noqa: E402
+from autopilot.engines import roblox_connector as roblox  # noqa: E402
 from autopilot.engines import roblox_mcp as mcp  # noqa: E402
 
 # Reads like a harness's observe: the player, a handful of things, a property, the screen's texts

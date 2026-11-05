@@ -1,8 +1,8 @@
-"""The Roblox engine (autopilot/engines/roblox.py) without Roblox Studio: the place is tests/robloxsim.py's, served by
-roblox_mcp.FakeStudio. Project detection, the kit frame, registration, the batched observe (one execute_luau per
-game.batch), the session's restart, inputs, the console as a detector, the codex, the Roblox section of the prompt,
-and the connector speaking the bridge's protocol to a real brain link. What runs in Studio itself (roblox.luau's Luau)
-is checked only for its framing here."""
+"""The roblox-mcp engine (autopilot/engines/roblox_connector.py) without Roblox Studio: the place is
+tests/robloxsim.py's, served by roblox_mcp.FakeStudio. Project detection, the kit frame, registration, the batched
+observe (one execute_luau per game.batch), the session's restart, inputs, the console as a detector, the codex, the
+Roblox section of the prompt, and the connector speaking the bridge's protocol to a real brain link. What runs in
+Studio itself (roblox.luau's Luau) is checked only for its framing here."""
 
 import json
 import math
@@ -15,7 +15,7 @@ import pytest
 import robloxsim
 
 from autopilot import engines
-from autopilot.engines import roblox
+from autopilot.engines import roblox_connector as roblox
 from autopilot.engines import roblox_mcp as mcp
 from autopilot.kit import Vec, control, forward
 from autopilot.kit.game import Game, GameError
@@ -47,14 +47,14 @@ def playing(place):
 # -- registration and the project on disk ------------------------------------------------------------------------
 
 def test_roblox_is_registered():
-    eng = engines.get("roblox")
-    assert isinstance(eng, roblox.Roblox) and eng.name == "roblox" and eng.title == "Roblox"
-    assert engines.ENGINES["roblox"] is eng
-    assert engines.for_hello({"engine": "Roblox"}) is eng
+    eng = engines.get("roblox-mcp")
+    assert isinstance(eng, roblox.RobloxMcp) and eng.name == "roblox-mcp" and eng.title == "Roblox"
+    assert engines.ENGINES["roblox-mcp"] is eng
+    assert engines.for_hello({"engine": "roblox-mcp"}) is eng
     assert engines.get("unreal").name == "unreal"  # (the default is as it was)
     from autopilot import bridge
 
-    assert {"find", "transforms", "pose", "movement"} <= set(bridge.required_ops({"engine": "roblox"}))
+    assert {"find", "transforms", "pose", "movement"} <= set(bridge.required_ops({"engine": "roblox-mcp"}))
 
 
 def test_projects_rojo_and_place_files(tmp_path):
@@ -63,17 +63,17 @@ def test_projects_rojo_and_place_files(tmp_path):
     (rojo / "default.project.json").write_text(json.dumps({"name": "Obby Rush", "tree": {"$className": "DataModel"}}))
     for p in (rojo, rojo / "default.project.json"):
         eng, path = engines.find_project(str(p))
-        assert eng.name == "roblox" and os.path.samefile(path, rojo), p
-    assert engines.get("roblox").project_name(str(rojo)) == "Obby Rush"
+        assert eng.name == "roblox-mcp" and os.path.samefile(path, rojo), p
+    assert engines.get("roblox-mcp").project_name(str(rojo)) == "Obby Rush"
     places = tmp_path / "Places"
     places.mkdir()
     (places / "Other.rbxl").write_bytes(b"<roblox!")
     (places / "Places.rbxlx").write_text("<roblox>")
     eng, path = engines.find_project(str(places))
-    assert eng.name == "roblox" and path.endswith("Places.rbxlx")  # (the one named after the folder)
+    assert eng.name == "roblox-mcp" and path.endswith("Places.rbxlx")  # (the one named after the folder)
     eng, path = engines.find_project(str(places / "Other.rbxl"))
-    assert eng.name == "roblox" and path.endswith("Other.rbxl")
-    assert engines.get("roblox").project_name(path) == "Other"
+    assert eng.name == "roblox-mcp" and path.endswith("Other.rbxl")
+    assert engines.get("roblox-mcp").project_name(path) == "Other"
     assert engines.find_project(str(tmp_path / "Obby" / "src")) == (None, None)
     assert engines.find_project(str(rojo), "godot") == (None, None)
     # (the other engines' projects are still theirs)
@@ -84,11 +84,11 @@ def test_projects_rojo_and_place_files(tmp_path):
 
 def test_the_test_place_is_a_roblox_project():
     eng, path = engines.find_project(TESTPLACE)
-    assert eng.name == "roblox" and eng.project_name(path) == "Autopilot Test Place"
+    assert eng.name == "roblox-mcp" and eng.project_name(path) == "Autopilot Test Place"
 
 
 def test_codex_rules():
-    r = engines.get("roblox")
+    r = engines.get("roblox-mcp")
     for ok in ("default.project.json", "src/server/Main.server.luau", "src/client/Hud.client.lua",
                "src/shared/Config.luau", "src/shared/Data.json", "places/Level.rbxlx", "src/Model.rbxmx",
                "wally.toml", "aftman.toml"):
@@ -126,7 +126,7 @@ def _roblox_forward(o):
 
 
 def test_frame_round_trip_and_axes():
-    r = engines.get("roblox")
+    r = engines.get("roblox-mcp")
     for v in (Vec(120, -35.5, 980), Vec(0, 0, 0), Vec(-1, 2, -3)):
         back = r.to_kit(r.to_native(v))
         assert max(abs(back.x - v.x), abs(back.y - v.y), abs(back.z - v.z)) < 1e-9
@@ -382,7 +382,7 @@ def test_restart_is_stop_then_start(place):
 
 def test_the_hello_names_the_place_studio_has_open(place):
     game, link, backend = connect(place)
-    assert link.hello["project"] == "TestPlace" and link.hello["engine"] == "roblox"  # (game.Name, in Edit)
+    assert link.hello["project"] == "TestPlace" and link.hello["engine"] == "roblox-mcp"  # (game.Name, in Edit)
     studio = mcp.Studio.connect(mcp.LocalTransport(place.server()))
     rojo = roblox.LocalLink(roblox.StudioBackend(studio, project=os.path.abspath(TESTPLACE)))
     assert rojo.hello["project"] == "Autopilot Test Place"  # (a Rojo project's own name)
@@ -428,7 +428,7 @@ def test_console_errors_are_log_events_and_findings(playing):
     assert backend.poll_console() == 0
     assert roblox.console_level("Hero joined the game") is None
     assert roblox.console_level("Workspace.Door.Script:12: Stack Begin") == "Error"
-    assert engines.get("roblox").error_log is True
+    assert engines.get("roblox-mcp").error_log is True
 
 
 def test_the_runtime_traces_console_errors(playing, tmp_path):
@@ -508,7 +508,7 @@ def test_codex_from_the_live_place(playing, tmp_path):
     reads = sum(1 for c in place.calls if c[0] == mcp.SCRIPT_READ)
     stats = fetch_from_plugin(game, str(root))
     assert sum(1 for c in place.calls if c[0] == mcp.SCRIPT_READ) == reads and stats["fetched"] == 0
-    engines.get("roblox").write_index(str(root), "TestPlace")
+    engines.get("roblox-mcp").write_index(str(root), "TestPlace")
     readme = (root / "README.md").read_text()
     assert "tags.txt" in readme and "*.server.luau" in readme
 
@@ -535,12 +535,12 @@ def test_codex_of_a_rojo_project_comes_from_disk(place):
 def test_prompt_roblox_section():
     from autopilot.agents import session
 
-    text = session.system_prompt(engines.get("roblox"), "runs/r")
+    text = session.system_prompt(engines.get("roblox-mcp"), "runs/r")
     assert "a video game made in Roblox." in text and "## The engine: Roblox" in text
     head = text[:text.index("## The engine: Roblox")]
     for unreal_name in ("Blueprint", "/Game/", "UMG", "Enhanced Input", "MaxStepHeight", "CharacterMovement"):
         assert unreal_name not in head, unreal_name
-    section = engines.get("roblox").kit_section()
+    section = engines.get("roblox-mcp").kit_section()
     assert section.strip() and section in text
     for needle in ("tag:", "CollectionService", "RemoteEvent", "server:", "client:", "game.restart()", "28 cm",
                    "stills", "tempo", "roblox_latency.py", "execute_luau", "HumanoidRootPart", "omitted"):
@@ -551,8 +551,8 @@ def test_prompt_roblox_section():
 
 
 def test_launch_is_the_connector(tmp_path):
-    cmd = engines.get("roblox").launch_command(TESTPLACE, "ws://127.0.0.1:9/v1/bridge", "g.log", exe="py")
-    assert cmd[:4] == ["py", "-m", "autopilot.engines.roblox", "connect"]
+    cmd = engines.get("roblox-mcp").launch_command(TESTPLACE, "ws://127.0.0.1:9/v1/bridge", "g.log", exe="py")
+    assert cmd[:4] == ["py", "-m", "autopilot.engines.roblox_connector", "connect"]
     assert cmd[cmd.index("--url") + 1] == "ws://127.0.0.1:9/v1/bridge" and "--project" in cmd
 
 
@@ -589,10 +589,10 @@ def played_over_the_bridge(link, place):
     from autopilot import bridge
 
     try:
-        assert link.hello["engine"] == "roblox" and link.hello["project"] == "TestPlace"
+        assert link.hello["engine"] == "roblox-mcp" and link.hello["project"] == "TestPlace"
         assert link.missing_ops() == []
         game = Game(link)
-        assert game.engine.name == "roblox"
+        assert game.engine.name == "roblox-mcp"
         link.request("session", {"action": "start"}, timeout=30)
         place.calls.clear()
         pose, coins = game.batch([lambda: game.pose(), lambda: game.get("Players/Hero/leaderstats", "Coins")])
@@ -668,3 +668,26 @@ def test_the_luau_prelude_ships_with_the_package():
     with open(os.path.join(HERE, "..", "pyproject.toml"), encoding="utf-8") as f:
         assert '"engines/*.luau"' in f.read()
     assert os.path.isfile(roblox.PRELUDE_FILE)
+
+
+def test_roblox_mcp_beside_a_studio_plugin_engine(monkeypatch, tmp_path):
+    """Should an engine for a Studio plugin be registered first (it claims Roblox places too), a place goes to it, and
+    AUTOPILOT_ENGINE=roblox-mcp chooses the connector; a plugin's hello says which engine it is either way."""
+    rojo = tmp_path / "Obby"
+    rojo.mkdir()
+    (rojo / "default.project.json").write_text(json.dumps({"name": "Obby", "tree": {"$className": "DataModel"}}))
+    assert engines.find_project(str(rojo))[0].name == "roblox-mcp"  # (the only engine that plays it)
+
+    class StudioPlugin(roblox.RobloxMcp):
+        name = "roblox"
+
+    monkeypatch.setattr(engines, "ENGINES", {"roblox": StudioPlugin(), **engines.ENGINES})
+    assert engines.find_project(str(rojo))[0].name == "roblox"
+    monkeypatch.setenv("AUTOPILOT_ENGINE", "roblox-mcp")
+    eng, path = engines.find_project(str(rojo))
+    assert eng.name == "roblox-mcp" and os.path.samefile(path, rojo)
+    monkeypatch.setenv("AUTOPILOT_ENGINE", "no-such-engine")  # (ignored)
+    assert engines.find_project(str(rojo))[0].name == "roblox"
+    assert engines.find_project(str(rojo), "godot") == (None, None)  # (an engine asked for by name still wins)
+    assert engines.for_hello({"engine": "roblox-mcp"}).name == "roblox-mcp"
+    assert engines.for_hello({"engine": "roblox"}).name == "roblox"

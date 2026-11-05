@@ -1,6 +1,6 @@
 # Roblox test place
 
-A tiny place for trying Autopilot's Roblox engine (`autopilot/engines/roblox.py`). It is a
+A tiny place for trying Autopilot's Roblox engine (`autopilot/engines/roblox_connector.py`). It is a
 [Rojo](https://rojo.space) project, so the whole place is in text:
 
 - **An obby**: three checkpoint platforms (tag `Checkpoint`, attribute `Stage` 1-3), each higher than the last, with a
@@ -20,7 +20,7 @@ A tiny place for trying Autopilot's Roblox engine (`autopilot/engines/roblox.py`
 rojo build examples/roblox_testplace -o TestPlace.rbxlx   # or `rojo serve` with the Rojo Studio plugin
 ```
 
-Open `TestPlace.rbxlx` in Roblox Studio and turn on Studio's MCP server (see [docs/roblox.md](../../docs/roblox.md)).
+Open `TestPlace.rbxlx` in Roblox Studio and turn on Studio's MCP server (see [docs/roblox-mcp.md](../../docs/roblox-mcp.md)).
 
 ## Run the bench suite
 

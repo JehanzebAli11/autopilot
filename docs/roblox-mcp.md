@@ -1,8 +1,13 @@
-# Roblox (experimental)
+# Roblox through Studio's MCP server: `roblox-mcp` (experimental)
 
-Autopilot plays Roblox places through **Roblox Studio's built-in MCP server**. There is no Autopilot plugin inside
-Studio. A small connector process (`autopilot/engines/roblox.py`) connects to Autopilot as a plugin would and turns the
-protocol's requests into Studio MCP tool calls. This is called **Route A**.
+The `roblox-mcp` engine plays Roblox places through **Roblox Studio's built-in MCP server**. There is no Autopilot
+plugin inside Studio. A small connector process (`autopilot/engines/roblox_connector.py`) connects to Autopilot as a
+plugin would and turns the protocol's requests into Studio MCP tool calls. This is called **Route A**.
+
+It is meant for runs that are scripted: the bench (`bench/run_autopilot.py`), and what is built on it, can start the
+connector for each prompt as it starts the other engines' headless games, with nothing installed in Studio. A native
+Studio plugin (Route B, below) is the way to play a place from inside Studio. Should both be installed, a Roblox
+place goes to the engine registered first; `AUTOPILOT_ENGINE=roblox-mcp` chooses this one.
 
 > **Status: the tools are checked against a live Studio; whole runs are still being tried.** The tool arguments, the
 > input actions' JSON and the tools' answers were read from Studio's own MCP server (RobloxStudio 1.0.0 on macOS,
@@ -15,7 +20,7 @@ protocol's requests into Studio MCP tool calls. This is called **Route A**.
 
 ```
 Autopilot (the brain) <-- bridge WebSocket, protocol v1 --> Roblox connector <-- MCP over stdio --> Studio's MCP server
-                                                            (engines/roblox.py)                    (StudioMCP / mcp.bat)
+                                                            (engines/roblox_connector.py)                    (StudioMCP / mcp.bat)
 ```
 
 | What Autopilot does | The Studio MCP tool it uses |
@@ -45,7 +50,7 @@ physics takes a stud as 0.28 m).
 5. **Start the connector** on the same machine as Studio:
 
    ```bash
-   python -m autopilot.engines.roblox connect --project <the Rojo folder or .rbxl/.rbxlx>
+   python -m autopilot.engines.roblox_connector connect --project <the Rojo folder or .rbxl/.rbxlx>
    ```
 
    It starts Studio's MCP server, checks its tools (with a message on what to do when one is missing), and connects to
@@ -142,10 +147,9 @@ Read from Studio's MCP server (RobloxStudio 1.0.0, macOS, 2026-11) on the test p
 
 - **Windows**: everything above was read on macOS. The server's command differs (`mcp.bat`); the tools should not.
 
-## Future work: Route B
+## Route B: a native Studio plugin
 
-Route B is a native Luau Studio plugin that speaks Autopilot's bridge protocol itself, connecting out to the brain over
-a WebSocket from inside Studio (which Studio API allows that for plugins is still to be confirmed), as the Unity and
-Godot plugins do. It would remove the MCP hop and the connector process, answer each read inside one frame, and could
-run frame-accurate detectors (NaN, teleport, long falls, hitches) and send frames from the game itself. Route A's Luau
-ops (`engines/roblox.luau`) and its kit-frame conversion are written to carry over.
+Route B is a native Luau Studio plugin that speaks Autopilot's bridge protocol itself, from inside Studio, as the
+Unreal, Unity and Godot plugins do: it answers each read inside one frame, runs frame-accurate detectors and plays a
+place from a dock in Studio. It is the way to play a place from Studio; Route A (this engine) is the way to run one from
+a script, with nothing installed in Studio. The two can be installed side by side (see the top of this page).
