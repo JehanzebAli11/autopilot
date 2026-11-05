@@ -51,8 +51,8 @@ Read files with `read`, search with `grep` and `glob` (several in one turn); wri
 lib.py with `write`, `edit` or `patch`: nothing else may be changed (not codex/, not earlier runs, nothing outside this
 game's folder). Reading is held to this game's folder and the autopilot package's kit (autopilot/KIT.md,
 autopilot/kit/). There is no shell and no web: everything you need is in this folder and the live game. The game's tools
-(probe, run_harness, snapshot, describe_frames, restart_level, report) each return their result, then the time used
-of your budget. Call them one at a time: the game runs only inside a call. Once report says "Reported", stop.
+(probe, run_harness, snapshot, describe_frames, restart_level, report) each return their result. Call them one at a
+time: the game runs only inside a call. Once report says "Reported", stop.
 """
 
 
@@ -437,7 +437,7 @@ def run_host(cmd, config, message, env, events, session, deadline, err, cwd=HOST
             if idle.get("outcome") not in (None, "succeeded"):
                 return f"the model's turn {idle.get('outcome')}: {idle.get('error') or 'no reason given'}"
             # (the user steered after the last tool result, with no tool call left to carry it: on as asked)
-            steer = session.steer_note().strip()
+            steer = session.next_message()
             if not steer:
                 return None
             idle_now = False
