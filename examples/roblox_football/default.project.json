@@ -1,0 +1,51 @@
+{
+  "name": "Autopilot Football Practice",
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$properties": {
+        "Gravity": 196.2
+      },
+      "Start": {
+        "$className": "SpawnLocation",
+        "$properties": {
+          "Anchored": true,
+          "Size": [6, 1, 6],
+          "Position": [0, 0.5, -70],
+          "Neutral": true,
+          "Duration": 0,
+          "Transparency": 1,
+          "CanCollide": false
+        }
+      }
+    },
+    "ReplicatedStorage": {
+      "$path": "src/shared",
+      "PlayState": {
+        "$className": "Configuration"
+      },
+      "Remotes": {
+        "$className": "Folder",
+        "ThrowBall": {
+          "$className": "RemoteEvent"
+        }
+      }
+    },
+    "ServerStorage": {
+      "FootballCommand": {
+        "$className": "BindableFunction"
+      }
+    },
+    "ServerScriptService": {
+      "$path": "src/server"
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "$path": "src/client"
+      }
+    },
+    "StarterGui": {
+      "$path": "src/gui"
+    }
+  }
+}

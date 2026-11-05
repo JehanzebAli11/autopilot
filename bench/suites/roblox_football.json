@@ -1,0 +1,20 @@
+{
+ "note": "Prompts for examples/roblox_football (a Rojo project: open its built place in Roblox Studio with Studio's MCP server on, then run bench/run_autopilot.py --project examples/roblox_football --suite bench/suites/roblox_football.json). 'expected' is what the place's code says (src/server/Football.luau, numbers in src/shared/Config.luau), checked with a frame-by-frame port of its rules (see the place's README); none of these has been run against a live Studio yet.",
+ "prompts": [
+  {"id": "A", "prompt": "Complete a pass to the open receiver", "expected": "achieved",
+   "why": "Y (Post route) has no defender assigned; a throw at its RouteEnd disc anywhere from about 1.9 s to 3 s after the snap, at full power, is caught (Completions + 1) well before the rusher (4 s delay, 12 studs/s) arrives."},
+  {"id": "B", "prompt": "Score a touchdown from the opponent's 20-yard line", "expected": "achieved",
+   "why": "Debug.ResetPlay(20) puts the line of scrimmage 20 yards out; Y's post ends 4 yards deep in the end zone, so the same pass is caught in the end zone: Result Touchdown."},
+  {"id": "C", "prompt": "Verify that a tackle ends the play", "expected": "CONFIRMED",
+   "why": "A defender within TackleRadius (3 studs) of the ball carrier ends the play: Phase Dead, Result Tackled, everyone stops (a QB who holds the ball is sacked by R1 about 5 s after the snap; or SpawnDefender ahead of a carrier)."},
+  {"id": "D", "prompt": "Verify that a touchdown adds 6 points to the player's score", "expected": "CONFIRMED",
+   "why": "endPlay('Touchdown') adds Config.TouchdownPoints (6) to leaderstats.Points and 1 to Touchdowns."},
+  {"id": "E", "prompt": "Verify that the quarterback can throw a forward pass after running past the line of scrimmage", "expected": "DENIED",
+   "why": "Football.throw refuses unless the QB's root is behind the line of scrimmage (z < LineOfScrimmageZ); the HUD says 'Can't throw: the QB is past the line of scrimmage'."},
+  {"id": "F", "prompt": "Verify that after a tackle the next play starts from the spot where the ball carrier was tackled", "expected": "DENIED",
+   "why": "It is a practice drill: a dead play resets after 4 s from the same YardsToGoal (Football.reset(nil) keeps it); only ResetPlay(yards) moves the line."},
+  {"id": "G", "prompt": "Verify that a ball carrier who runs past the sideline ends the play", "expected": "CONFIRMED",
+   "why": "checkCarrier ends the play as OutOfBounds once the carrier's |x| passes HalfWidth (53 studs)."},
+  {"id": "H", "prompt": "Explore the passing play for bugs"}
+ ]
+}
