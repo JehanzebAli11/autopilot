@@ -18,7 +18,12 @@ With regressions (autopilot/regress.py), a change that makes one fail that passe
 
 The loop is Karpathy's autoresearch: a fixed evaluation, one change at a time, keep or revert, log everything. The
 changes come from a candidates file, or from a model (--propose N), shown the target, the log of what was tried on it,
-and the suite's misses.
+the suite's misses grouped by how they went wrong, and the maintainers' notes on where Autopilot fails (--direction).
+
+Small suites are noisy, so a win must be real: the baseline is measured several times (--noise) and a change must beat
+that spread; a change that wins is measured again and must win again (--confirm); and a held-out suite the proposals
+never see (--holdout) must not get worse. Prompts start cold (a fresh memory), or warm from a frozen memory folder
+(--memory), or both (--cold-and-warm), reported apart: what failed runs teach shows in the warm numbers.
 """
 
 import ast
@@ -363,9 +368,9 @@ def load_suite(path):
     return [{"id": c["id"], "prompt": c["prompt"], "expected": c.get("expected")} for c in spec.get("prompts", [])]
 
 
-def lock_suite(suite, out, relock=False):
-    """Lock the suite (its hash in out/suite.lock), or check it against the lock: SuiteChanged when it differs."""
-    lock = os.path.join(out, "suite.lock")
+def lock_suite(suite, out, relock=False, name="suite.lock"):
+    """Lock the suite (its hash in out/<name>), or check it against the lock: SuiteChanged when it differs."""
+    lock = os.path.join(out, name)
     digest = suite_hash(suite)
     if os.path.exists(lock) and not relock:
         with open(lock, encoding="utf-8") as f:
@@ -393,9 +398,35 @@ def tokens_of(value):
     return 0
 
 
+def _summary(items):
+    """One suite run's pass rate, seconds and tokens."""
+    scored = [i for i in items if i.get("correct") is not None]
+    return {"rate": round(sum(1 for i in scored if i["correct"]) / len(scored), 4) if scored else 0.0,
+            "seconds": round(sum(float(i.get("seconds") or 0) for i in items), 2),
+            "tokens": sum(tokens_of(i.get("tokens")) for i in items)}
+
+
+def noise_of(per_run):
+    """How much the unchanged suite moves from one run to the next (per_run: _summary() of each run): the spread
+    (max - min) of the pass rate, and of time and tokens as a share of their mean. A change must beat it to count."""
+    if len(per_run) < 2:
+        return None
+
+    def spread(key, relative):
+        values = [r[key] for r in per_run]
+        width = max(values) - min(values)
+        mean = sum(values) / len(values)
+        return round(width / mean, 4) if relative and mean else round(width, 4)
+
+    return {"runs": len(per_run), "rate": spread("rate", False), "seconds": spread("seconds", True),
+            "tokens": spread("tokens", True)}
+
+
 def metrics(runs, regressions=None):
     """The suite's measure from its results (runs: one list of item results per repeat; an item result has id,
-    correct (True/False/None: unscored), seconds, tokens): pass rate, mean seconds and tokens per suite run."""
+    correct (True/False/None: unscored), seconds, tokens, and a condition when the suite runs under several, e.g.
+    cold and warm): pass rate, mean seconds and tokens per suite run, each run's own (per_run), and each
+    condition's."""
     runs = [r for r in runs if r is not None]
     n = max(1, len(runs))
     scored = [i for r in runs for i in r if i.get("correct") is not None]
@@ -413,9 +444,17 @@ def metrics(runs, regressions=None):
             it["runs"] += 1
             it["passed"] += 1 if i.get("correct") else 0
             it["got"].append(i.get("got"))
-            for k in ("expected", "prompt", "summary"):
+            for k in ("expected", "prompt", "summary", "evidence", "condition"):
                 if i.get(k) is not None:
                     it[k] = i[k]
+    m["per_run"] = [_summary(r) for r in runs]
+    conditions = sorted({i["condition"] for r in runs for i in r if i.get("condition")})
+    if conditions:
+        m["conditions"] = {}
+        for c in conditions:
+            sub = metrics([[{k: v for k, v in i.items() if k != "condition"} for i in r if i.get("condition") == c]
+                           for r in runs])
+            m["conditions"][c] = {k: sub[k] for k in ("passed", "total", "rate", "seconds", "tokens")}
     if regressions is not None:
         m["regressions"] = {"passed": regressions["passed"], "total": regressions["total"],
                             "failed": list(regressions["failed"])}
@@ -426,23 +465,32 @@ def _gain(before, after):
     return (before - after) / before if before else 0.0
 
 
-def decide(base, cand, min_gain=MIN_GAIN):
-    """("keep" | "revert", why) for a candidate's metrics against the baseline's."""
+def decide(base, cand, min_gain=MIN_GAIN, noise=None):
+    """("keep" | "revert", why) for a candidate's metrics against the baseline's. noise (noise_of(), default the
+    baseline's own): a pass rate must rise by more than its spread to count, and time or tokens must fall by more than
+    theirs (and by min_gain at least); a pass rate that moved within its spread counts as equal, but never a fall."""
+    noise = noise if noise is not None else (base.get("noise") or {})
+    nr = noise.get("rate", 0.0)
     broke = sorted(set((cand.get("regressions") or {}).get("failed") or [])
                    - set((base.get("regressions") or {}).get("failed") or []))
     if broke:
         return "revert", f"breaks regression(s) {', '.join(broke)}"
-    if cand["rate"] > base["rate"] + 1e-9:
-        return "keep", f"pass rate {base['rate']:.0%} -> {cand['rate']:.0%}"
+    rates = f"pass rate {base['rate']:.0%} -> {cand['rate']:.0%}"
+    if cand["rate"] > base["rate"] + nr + 1e-9:
+        return "keep", rates + (f" (beyond its noise, {nr:.0%})" if nr else "")
     if cand["rate"] < base["rate"] - 1e-9:
-        return "revert", f"pass rate {base['rate']:.0%} -> {cand['rate']:.0%}"
+        return "revert", rates + (" (within its noise, but a fall)" if cand["rate"] >= base["rate"] - nr - 1e-9
+                                  else "")
+    equal = "an equal pass rate" if cand["rate"] <= base["rate"] + 1e-9 else f"a pass rate within its noise ({rates})"
+    ts, tt = max(min_gain, noise.get("seconds", 0.0)), max(min_gain, noise.get("tokens", 0.0))
     sg, tg = _gain(base["seconds"], cand["seconds"]), _gain(base["tokens"], cand["tokens"])
     ds, dt = 0.0 - sg, 0.0 - tg  # (the changes, as signed shares: never -0%)
-    if sg >= min_gain and tg >= -min_gain:
-        return "keep", f"time -{sg:.0%} at an equal pass rate" + (f" (tokens {dt:+.0%})" if base["tokens"] else "")
-    if tg >= min_gain and sg >= -min_gain:
-        return "keep", f"tokens -{tg:.0%} at an equal pass rate (time {ds:+.0%})"
-    return "revert", f"no gain at an equal pass rate (time {ds:+.0%}, tokens {dt:+.0%})"
+    if sg >= ts and tg >= -tt:
+        return "keep", f"time -{sg:.0%} at {equal}" + (f" (tokens {dt:+.0%})" if base["tokens"] else "")
+    if tg >= tt and sg >= -ts:
+        return "keep", f"tokens -{tg:.0%} at {equal} (time {ds:+.0%})"
+    beyond = f" beyond the noise (time ±{ts:.0%}, tokens ±{tt:.0%})" if noise else ""
+    return "revert", f"no gain{beyond} at {equal} (time {ds:+.0%}, tokens {dt:+.0%})"
 
 
 # -- the log -------------------------------------------------------------------------------------------------------
@@ -541,6 +589,7 @@ class BenchRunner:
     codex: Optional[str] = None
     lib: Optional[str] = None
     engine: Optional[str] = None
+    memory: Optional[str] = None  # a project's memory folder every prompt starts as a copy of (warm); None: cold
     python: str = sys.executable
     bench: str = os.path.join(REPO, "bench", "run_autopilot.py")
 
@@ -548,12 +597,28 @@ class BenchRunner:
         cmd = [self.python, self.bench, "--project", self.project, "--suite", self.suite, "--parallel",
                str(self.parallel), "--minutes", str(self.minutes), "--out", out, "--quiet"]
         for flag, value in (("--model", self.model), ("--agent", self.agent), ("--codex", self.codex),
-                            ("--lib", self.lib), ("--engine", self.engine)):
+                            ("--lib", self.lib), ("--engine", self.engine), ("--memory", self.memory)):
             if value:
                 cmd += [flag, value]
         subprocess.run(cmd, cwd=REPO, check=False)
         with open(os.path.join(out, "summary.json"), encoding="utf-8") as f:
             return json.load(f)["results"]
+
+
+@dataclass
+class Conditions:
+    """Several runners as one suite run, each a condition (e.g. cold: a fresh memory; warm: a frozen memory's copy):
+    their items, ids prefixed with the condition's name ("cold:A", "warm:A") and marked with it."""
+
+    runners: list  # [(name, runner)]
+
+    def __call__(self, out):
+        items = []
+        for name, run in self.runners:
+            here = os.path.join(out, name)
+            os.makedirs(here, exist_ok=True)
+            items += [dict(i, id=f"{name}:{i['id']}", condition=name) for i in run(here)]
+        return items
 
 
 @dataclass
@@ -588,11 +653,12 @@ PROPOSE_SYSTEM = """You improve one piece of Autopilot, an agent that playtests 
 decision model and runs it against the live game. A fixed bench suite measures it: the share of prompts that end with
 their expected answer, then the time and tokens they take. You change one piece at a time; the change is kept only if
 the suite does better, else reverted. Propose one change to the piece you are shown. Small, specific changes that
-address the suite's misses beat rewrites; don't repeat a change the log shows was reverted. Answer with one line
+address the suite's misses beat rewrites: start from the biggest group of misses, and from the maintainers' notes on
+where Autopilot fails when there are some; don't repeat a change the log shows was reverted. Answer with one line
 `NOTE: <what the change does and why>`, then the whole new piece in one fenced block (```), nothing after it."""
 
 
-def proposal_prompt(target, current, history, base):
+def proposal_prompt(target, current, history, base, direction=None):
     kinds = {"prompt": "a paragraph of the agent's system prompt (a Python str.format template: keep its {fields} "
                        "and double braces as they are)",
              "kit": "a section of KIT.md, the kit's reference the agent reads (keep its heading)",
@@ -601,12 +667,25 @@ def proposal_prompt(target, current, history, base):
     lines = [f"The piece: {target.spec} ({kinds[target.kind]}).", "", "It is now:", "```", current.rstrip("\n"), "```",
              "", f"The suite now: {base['passed']:g}/{base['total']:g} passed, {base['seconds']:g} s, "
                  f"{base['tokens']:g} tokens a run."]
+    for c, cm in (base.get("conditions") or {}).items():
+        lines.append(f"- {c}: {cm['passed']:g}/{cm['total']:g} passed, {cm['seconds']:g} s, {cm['tokens']:g} tokens")
+    if direction and direction.strip():
+        lines += ["", "Where to look: the maintainers' own notes on where Autopilot fails. They come first: a change "
+                      "that follows them beats one that only chases the numbers.", direction.strip()]
     misses = [(k, v) for k, v in base.get("items", {}).items() if v.get("passed", 0) < v.get("runs", 0)]
     if misses:
-        lines.append("Its misses:")
+        groups = {}  # (what was expected, what came instead) -> the misses that went that way
         for k, v in misses:
-            lines.append(f"- {k}: {v.get('prompt', '')!r} expected {v.get('expected')}, got {v.get('got')}"
-                         + (f": {_cell(v.get('summary'), 300)}" if v.get("summary") else ""))
+            wrong = sorted({str(g) for g in v.get("got") or []} - {str(v.get("expected"))})
+            groups.setdefault((str(v.get("expected")), ", ".join(wrong) or "?"), []).append((k, v))
+        lines.append("Its misses, grouped by how they went wrong (biggest group first):")
+        for (expected, got), group in sorted(groups.items(), key=lambda g: -len(g[1])):
+            lines.append(f"- expected {expected}, got {got} ({len(group)}):")
+            for k, v in group:
+                lines.append(f"  - {k}: {v.get('prompt', '')!r}"
+                             + (f": {_cell(v.get('summary'), 300)}" if v.get("summary") else ""))
+                for e in (v.get("evidence") or [])[:2]:
+                    lines.append(f"    - {_cell(e, 200)}")
     tried = [r for r in history if r.get("target") == target.spec and r["kind"] == "experiment"]
     if tried:
         lines += ["", "Tried on this piece before:"]
@@ -635,7 +714,8 @@ def parse_proposal(answer):
 class ModelProposer:
     """Changes from a language model (llm.Model's route, the agent's provider), or from ask(prompt, system) given."""
 
-    def __init__(self, ask=None, provider=None):
+    def __init__(self, ask=None, provider=None, direction=None):
+        self.direction = direction
         if ask is None:
             from . import llm
             from .agents import session
@@ -646,7 +726,8 @@ class ModelProposer:
         self.ask = ask
 
     def __call__(self, target, current, history, base):
-        return parse_proposal(self.ask(proposal_prompt(target, current, history, base), system=PROPOSE_SYSTEM))
+        return parse_proposal(self.ask(proposal_prompt(target, current, history, base, self.direction),
+                                       system=PROPOSE_SYSTEM))
 
 
 # -- the loop ------------------------------------------------------------------------------------------------------
@@ -675,11 +756,16 @@ class Evolve:
     relock: bool = False
     say: Callable = print
     baseline: Optional[dict] = field(default=None)
+    noise_runs: int = 0  # the baseline is measured this many times (2+) and its spread is the bar a change must clear
+    confirm: bool = False  # a change that wins is measured again, and kept only if it wins again
+    holdout: Optional[str] = None  # a second suite (locked too) evolve never proposes from: a kept change can't...
+    run_holdout: Optional[Callable] = None  # ... do worse on it (run_holdout(out) -> item results)
 
     def __post_init__(self):
         os.makedirs(self.out, exist_ok=True)
         self.log = Log(self.out)
         self.lock = None
+        self.holdout_base = None
         self.recover()
 
     # -- safety
@@ -707,23 +793,30 @@ class Evolve:
             pass
 
     def check_lock(self):
-        self.lock = lock_suite(self.suite, self.out, relock=self.relock and self.lock is None)
+        first = self.lock is None
+        self.lock = lock_suite(self.suite, self.out, relock=self.relock and first)
+        if self.holdout:
+            lock_suite(self.holdout, self.out, relock=self.relock and first, name="holdout.lock")
 
     # -- measuring
 
-    def measure(self, label):
+    def measure(self, label, times=None, runner=None, regressions=True):
+        """The suite (or runner's) metrics over `times` runs (default --repeats), with the regressions replayed. The
+        runs' items are kept under "_runs" (for merging measures; never logged)."""
         folder = os.path.join(self.out, "runs", f"{time.strftime('%Y%m%d-%H%M%S')}-{label}")
+        times = max(1, times or self.repeats)
         runs = []
-        for k in range(max(1, self.repeats)):
-            here = os.path.join(folder, f"r{k + 1}") if self.repeats > 1 else folder
+        for k in range(times):
+            here = os.path.join(folder, f"r{k + 1}") if times > 1 else folder
             os.makedirs(here, exist_ok=True)
-            runs.append(self.run_suite(here))
+            runs.append((runner or self.run_suite)(here))
         regs = None
-        if self.run_regressions is not None:
+        if regressions and self.run_regressions is not None:
             os.makedirs(folder, exist_ok=True)
             regs = self.run_regressions(folder)
         m = metrics(runs, regs)
         m["runs_dir"] = os.path.relpath(folder, self.out)
+        m["_runs"] = runs
         return m
 
     # -- the experiments
@@ -731,11 +824,22 @@ class Evolve:
     def start(self):
         self.check_lock()
         if self.baseline is None:
-            self.say("Measuring the baseline")
-            self.baseline = self.measure("baseline")
-            self.log.add({"kind": "baseline", "when": _now(), "suite_sha256": self.lock["sha256"],
-                          "metrics": self.baseline, "decision": "baseline",
-                          "why": "the suite as the code is now"})
+            times = max(self.repeats, self.noise_runs if self.noise_runs >= 2 else 0)
+            self.say("Measuring the baseline" + (f" ({times} runs, for the noise floor)" if times > 1 else ""))
+            self.baseline = self.measure("baseline", times=times)
+            noise = noise_of(self.baseline["per_run"]) if self.noise_runs >= 2 else None
+            if noise:
+                self.baseline["noise"] = noise
+            why = "the suite as the code is now"
+            if noise:
+                why += (f"; noise over {noise['runs']} runs: pass rate ±{noise['rate']:.0%}, "
+                        f"time ±{noise['seconds']:.0%}, tokens ±{noise['tokens']:.0%}")
+            record = {"kind": "baseline", "when": _now(), "suite_sha256": self.lock["sha256"],
+                      "metrics": _public(self.baseline), "decision": "baseline", "why": why}
+            if self.run_holdout is not None:
+                self.holdout_base = self.measure("holdout-baseline", runner=self.run_holdout, regressions=False)
+                record["holdout"] = _public(self.holdout_base)
+            self.log.add(record)
             self.say(self._line(self.baseline))
         return self.baseline
 
@@ -752,7 +856,7 @@ class Evolve:
         record = {"kind": "experiment", "when": _now(), "target": t.spec or f"{t.kind}:{t.selector}",
                   "file": (_rel(t.path, REPO) or t.path).replace(os.sep, "/"), "note": exp.note,
                   "baseline": _short(base), "suite_sha256": self.lock["sha256"]}
-        why_locked = locked(t.path, also=(self.suite, self.out))
+        why_locked = locked(t.path, also=(self.suite, self.out, self.holdout))
         if why_locked:
             return self.log.add(dict(record, decision="refused", why=why_locked))
         original = t.raw()
@@ -782,6 +886,26 @@ class Evolve:
             _write(t.path, new_file)
             cand = self.measure(f"exp{n}")
             decision, why = decide(base, cand, self.min_gain)
+            if decision == "keep" and self.confirm:  # (a win must win again: one lucky run isn't a change)
+                again = self.measure(f"exp{n}-confirm")
+                record["confirm"] = _public(again)
+                second, why2 = decide(base, again, self.min_gain)
+                if second != "keep":
+                    decision, why = "revert", f"not confirmed: {why2} (the first run: {why})"
+                else:
+                    cand = metrics(cand["_runs"] + again["_runs"], again.get("regressions"))
+                    cand["_runs"] = []
+                    why += f"; confirmed ({why2})"
+            if decision == "keep" and self.run_holdout is not None:  # (out of sample: never worse there)
+                hold = self.measure(f"exp{n}-holdout", runner=self.run_holdout, regressions=False)
+                record["holdout"] = _public(hold)
+                hb, nr = self.holdout_base, (base.get("noise") or {}).get("rate", 0.0)
+                if hold["rate"] < hb["rate"] - nr - 1e-9:
+                    decision, why = "revert", (f"worse on the held-out suite ({hb['rate']:.0%} -> {hold['rate']:.0%})"
+                                               f", though {why}")
+                else:
+                    self.holdout_base = hold
+                    why += f"; held-out suite {hb['rate']:.0%} -> {hold['rate']:.0%}"
         except KeyboardInterrupt:
             _write(t.path, original)
             self._done_pending()
@@ -794,14 +918,21 @@ class Evolve:
             self._done_pending()
         self.check_lock()  # (the measure itself must not have moved)
         if decision == "keep":
+            if base.get("noise"):
+                cand["noise"] = base["noise"]  # (the suite's noise is the suite's, whatever the code)
             self.baseline = cand
         self.say(f"  {decision}: {why}")
-        return self.log.add(dict(record, metrics=cand, decision=decision, why=why))
+        return self.log.add(dict(record, metrics=_public(cand), decision=decision, why=why))
 
     def run(self, experiments):
         """Every experiment in turn (an iterable: a proposer's may depend on the log so far); their records."""
         self.start()
         return [self.try_one(e) for e in experiments]
+
+
+def _public(m):
+    """Metrics as logged: without the runs' raw items."""
+    return {k: v for k, v in m.items() if k != "_runs"} if m else m
 
 
 def _short(m):
@@ -876,8 +1007,12 @@ def main(args):
         return 1
     try:
         experiments = load_candidates(args.candidates, lib=lib) if args.candidates else []
+        direction = None
+        if args.direction:
+            with open(args.direction, encoding="utf-8") as f:
+                direction = f.read()
         if args.target:
-            proposer = ModelProposer()
+            proposer = ModelProposer(direction=direction)
             for spec in args.target:
                 t = parse_target(spec, lib=lib)
                 experiments += [Experiment(t, propose=proposer) for _ in range(max(1, args.propose))]
@@ -890,13 +1025,29 @@ def main(args):
     if not args.project:
         print("--project: the game the suite runs on")
         return 1
+    if args.cold_and_warm and not args.memory:
+        print("--cold-and-warm: give --memory, the frozen memory folder the warm runs start from")
+        return 1
+    if args.memory and not os.path.isdir(args.memory):
+        print(f"--memory: {args.memory} isn't a folder")
+        return 1
     out = args.out or os.path.join(REPO, "bench", "evolve")
-    runner = BenchRunner(args.project, args.suite, parallel=args.parallel, minutes=args.minutes, model=args.model,
-                         agent=args.agent, codex=args.codex, lib=lib if lib and os.path.exists(lib) else None,
-                         engine=args.engine)
+
+    def runner_for(suite):
+        def bench(memory):
+            return BenchRunner(args.project, suite, parallel=args.parallel, minutes=args.minutes, model=args.model,
+                               agent=args.agent, codex=args.codex, lib=lib if lib and os.path.exists(lib) else None,
+                               engine=args.engine, memory=memory)
+
+        if args.cold_and_warm:
+            return Conditions([("cold", bench(None)), ("warm", bench(args.memory))])
+        return bench(args.memory)
+
     regs = RegressionRunner(args.project, args.regressions, engine=args.engine) if args.regressions else None
     try:
-        loop = Evolve(args.suite, out, runner, regs, repeats=args.repeats, min_gain=args.min_gain, relock=args.relock)
+        loop = Evolve(args.suite, out, runner_for(args.suite), regs, repeats=args.repeats, min_gain=args.min_gain,
+                      relock=args.relock, noise_runs=args.noise, confirm=not args.no_confirm, holdout=args.holdout,
+                      run_holdout=runner_for(args.holdout) if args.holdout else None)
         records = loop.run(experiments)
     except SuiteChanged as e:
         print(e)
@@ -925,6 +1076,19 @@ def add_parser(sub):
                    help=f"the share time or tokens must fall by at an equal pass rate (default {MIN_GAIN})")
     e.add_argument("--regressions", help="a regressions folder (autopilot regress) also replayed per measure: a "
                                          "change that breaks one is reverted")
+    e.add_argument("--noise", type=int, default=3, metavar="N",
+                   help="measure the baseline N times; a change must beat that spread to count (default 3; 0: off)")
+    e.add_argument("--no-confirm", action="store_true",
+                   help="keep a change that wins once (default: it is measured again and must win again)")
+    e.add_argument("--holdout", metavar="SUITE",
+                   help="a second suite (locked too) proposals never see: a kept change can't do worse on it")
+    e.add_argument("--memory", metavar="DIR",
+                   help="a project's memory folder (memory/<project>) every prompt starts as a copy of: warm runs, "
+                        "from the same frozen memory each time")
+    e.add_argument("--cold-and-warm", action="store_true",
+                   help="measure both: each suite run plays every prompt cold (a fresh memory) and warm (--memory)")
+    e.add_argument("--direction", metavar="FILE",
+                   help="your notes on where Autopilot fails, given to the model's proposals before the numbers")
     e.add_argument("--out", help="the experiments log's folder (default bench/evolve)")
     e.add_argument("--relock", action="store_true", help="lock the suite anew (it changed)")
     e.add_argument("--minutes", type=float, default=30, help="each prompt's time (the bench's --minutes)")

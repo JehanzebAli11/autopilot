@@ -237,8 +237,10 @@ locked bench suite, kept only when the suite does better, everything logged.
 ```bash
 autopilot evolve --show "prompt:Rules"            # what a target holds now
 autopilot evolve --suite bench/example.json --project path/to/Game --candidates experiments.json [--parallel 2]
-    [--repeats 2] [--regressions memory/<project>/regressions] [--out bench/evolve]
+    [--repeats 2] [--noise 3] [--holdout held-out.json] [--memory memory/<project> [--cold-and-warm]]
+    [--regressions memory/<project>/regressions] [--out bench/evolve]
 autopilot evolve --suite bench/example.json --project path/to/Game --target "kit:The plan" --propose 5
+    [--direction where-it-fails.md]
 ```
 
 - **Targets**, one per experiment: `prompt:<n or first words>` (a paragraph of `SYSTEM`), `kit:<heading>` (a section of
@@ -250,8 +252,21 @@ autopilot evolve --suite bench/example.json --project path/to/Game --target "kit
   over `--repeats`) and keeps the change only when the pass rate rises, or, at an equal pass rate, time or tokens fall by
   `--min-gain` (2%) without the other rising as much. With `--regressions`, a change that makes a regression fail that
   passed before is reverted too. Otherwise the file is put back byte for byte.
+- **Noise**: runs vary, and on a small suite one prompt flipping looks like a 10% win. The baseline is measured
+  `--noise` times (3 by default; 0: off), and a change must beat that spread: a pass rate must rise by more than the
+  baseline's own spread, and time or tokens must fall by more than theirs. A change that wins is measured again and kept
+  only if it wins again (`--no-confirm` turns that off).
+- **Out of sample**: `--holdout` names a second suite (locked too) that proposals never see: a change the suite likes
+  but that does worse there is reverted. Use other prompts and, better, another game.
+- **Cold and warm**: by default each prompt starts with a fresh memory (cold: a game Autopilot has never played).
+  `--memory memory/<project>` starts each one from a copy of that frozen memory instead (warm: what earlier runs
+  learned, failures included, the same for every experiment), and `--cold-and-warm` measures both, reported apart.
+  The bench takes the same `--memory`.
 - **The changes** come from a candidates file (`{"experiments": [{"target", "text" | "file", "note"}]}`) or from a model
-  (`--target ... --propose N`), shown the target, the suite's misses and what was tried on it before.
+  (`--target ... --propose N`), shown the target, the suite's misses grouped by how they went wrong (with their
+  evidence) and what was tried on it before. `--direction` gives it your own notes on where Autopilot fails, ahead of
+  the numbers: the loop measures ideas carefully; where to look is still a person's call. Structural ideas (a new kind
+  of controller) belong in a candidates file, written by hand, for the loop to measure.
 - **The log**, in `--out` (default `bench/evolve/`): `experiments.jsonl` and `experiments.md` (a row each: the target, the
   diff, the metrics before and after, the decision and why) and `diffs/`. The suite's hash is locked in `suite.lock` on
   the first run: a changed suite is refused (`--relock` starts a new lock).

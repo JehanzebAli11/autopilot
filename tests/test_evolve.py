@@ -277,10 +277,13 @@ def test_model_proposals(files, tmp_path):
 
     t = parse_target(f"kit:Game@{files / 'KIT.md'}")
     loop = Evolve(suite_file(tmp_path), str(tmp_path / "log"), FakeAgent(files), say=lambda s: None)
-    proposer = evolve.ModelProposer(ask=ask)
+    proposer = evolve.ModelProposer(ask=ask, direction="Most misses: runs that read the game one value at a time.")
     first = loop.run([Experiment(t, propose=proposer)])
     assert first[0]["decision"] == "keep" and first[0]["note"] == "say to batch reads"
-    assert "Its misses:\n- A: 'Reach the door' expected achieved, got ['not_achieved']: too slow to read" in asked[0]
+    assert ("Its misses, grouped by how they went wrong (biggest group first):\n- expected achieved, got not_achieved "
+            "(1):\n  - A: 'Reach the door': too slow to read") in asked[0]
+    assert "Where to look" in asked[0] and "one value at a time" in asked[0]
+    assert asked[0].index("Where to look") < asked[0].index("Its misses")  # (the maintainers' notes come first)
     assert "## Game (`game`)\nReads and writes." in asked[0]
     # the next proposal is shown what was tried on the piece
     loop.run([Experiment(t, propose=evolve.ModelProposer(ask=lambda p, system=None: asked.append(p) or "no block"))])
@@ -443,6 +446,21 @@ def test_the_command(files, tmp_path, monkeypatch, capsys):
     assert evolve.main(cli.parser().parse_args(["evolve", "--suite", suite])) == 1  # (no experiments)
     args.candidates = str(tmp_path / "missing.json")
     assert evolve.main(args) == 1
+    # warm and cold: --cold-and-warm needs --memory; the runners get it (the warm one) and the loop its rigour
+    assert evolve.main(cli.parser().parse_args(["evolve", "--suite", suite, "--project", str(tmp_path / "Game"),
+                                                "--candidates", str(candidates), "--cold-and-warm"])) == 1
+    frozen = tmp_path / "frozen"
+    frozen.mkdir()
+    made.clear()
+    seen = {}
+    monkeypatch.setattr(evolve.Evolve, "run", lambda self, exps: seen.update(loop=self) or [])
+    assert evolve.main(cli.parser().parse_args([
+        "evolve", "--suite", suite, "--project", str(tmp_path / "Game"), "--candidates", str(candidates),
+        "--cold-and-warm", "--memory", str(frozen), "--holdout", suite, "--out", str(tmp_path / "log3")])) == 0
+    assert [kw["memory"] for _, _, kw in made] == [None, str(frozen), None, str(frozen)]  # (suite, then held-out)
+    loop = seen["loop"]
+    assert loop.noise_runs == 3 and loop.confirm and loop.holdout == suite
+    assert isinstance(loop.run_suite, evolve.Conditions) and isinstance(loop.run_holdout, evolve.Conditions)
 
 
 def test_windows_line_endings_and_drives(files, tmp_path, monkeypatch):
@@ -469,3 +487,124 @@ def test_windows_line_endings_and_drives(files, tmp_path, monkeypatch):
     monkeypatch.setattr(evolve.os.path, "relpath", other_drive)
     assert evolve.locked(str(files / "lib.py")) is None
     assert evolve._rel(str(files / "lib.py"), evolve.REPO) is None
+
+
+# -- noise, confirmation, a held-out suite, cold and warm ------------------------------------------------------------
+
+class Scripted:
+    """A suite runner that plays back scripted results: each call takes the next list of (id, correct, seconds)."""
+
+    def __init__(self, *runs):
+        self.runs, self.calls = list(runs), 0
+
+    def __call__(self, out):
+        self.calls += 1
+        items = self.runs.pop(0) if len(self.runs) > 1 else self.runs[0]
+        return [{"id": i, "correct": c, "seconds": s, "tokens": 100, "prompt": f"prompt {i}", "expected": "achieved",
+                 "got": "achieved" if c else "not_achieved", "summary": f"summary {i}",
+                 "evidence": [f"evidence {i} 1", f"evidence {i} 2", f"evidence {i} 3"]} for i, c, s in items]
+
+
+def run4(passed, seconds=10):
+    return [(k, k in passed, seconds) for k in "ABCD"]
+
+
+def test_the_noise_floor(tmp_path):
+    """The baseline measured 3 times: one prompt flips between runs, so the pass rate's noise is 25%; a candidate one
+    prompt better is within it (time decides, at an equal rate), two prompts better is beyond it."""
+    per_run = [evolve._summary([{"correct": c, "seconds": s, "tokens": 10} for c, s in r])
+               for r in ([(True, 10), (False, 10)], [(True, 12), (True, 10)], [(True, 10), (False, 9)])]
+    noise = evolve.noise_of(per_run)
+    assert noise == {"runs": 3, "rate": 0.5, "seconds": round(3 / ((20 + 22 + 19) / 3), 4), "tokens": 0.0}
+    assert evolve.noise_of(per_run[:1]) is None
+
+    base = dict(m(0.5), noise={"rate": 0.25, "seconds": 0.1, "tokens": 0.0})
+    assert evolve.decide(base, m(0.75))[0] == "revert"  # (+1 prompt: within the noise, and no faster)
+    assert "within its noise" in evolve.decide(base, m(0.75))[1]
+    assert evolve.decide(base, m(1.0)) == ("keep", "pass rate 50% -> 100% (beyond its noise, 25%)")
+    assert evolve.decide(base, m(0.5, seconds=95))[0] == "revert"  # (5% faster: inside the 10% time noise)
+    assert evolve.decide(base, m(0.5, seconds=85))[0] == "keep"
+    assert evolve.decide(base, m(0.25, seconds=50)) == ("revert", "pass rate 50% -> 25% (within its noise, but a fall)")
+
+    loop = Evolve(suite_file(tmp_path), str(tmp_path / "log"),
+                  Scripted(run4("AB"), run4("ABC"), run4("AB", 11), run4("ABCD")), noise_runs=3, say=lambda s: None)
+    base = loop.start()
+    assert base["noise"]["runs"] == 3 and base["noise"]["rate"] == 0.25 and base["rate"] == round(7 / 12, 4)
+    record = loop.log.records()[0]
+    assert "noise over 3 runs: pass rate ±25%" in record["why"] and "_runs" not in record["metrics"]
+
+
+def test_a_change_must_win_again(files, tmp_path):
+    """--confirm: a change that wins once is measured again; a lucky run doesn't stick, a real gain does (and the
+    baseline after it is both runs together)."""
+    t = parse_target(f"kit:Geometry@{files / 'KIT.md'}")
+    original = (files / "KIT.md").read_text()
+    runner = Scripted(run4("AB"), run4("ABCD"), run4("AB"))  # (the baseline, a lucky win, then back to 2/4)
+    loop = Evolve(suite_file(tmp_path), str(tmp_path / "log"), runner, confirm=True, say=lambda s: None)
+    r = loop.try_one(Experiment(t, "## Geometry\nVec, Rot.\n"))
+    assert r["decision"] == "revert" and r["why"].startswith("not confirmed: no gain at an equal pass rate")
+    assert r["why"].endswith("(the first run: pass rate 50% -> 100%)")
+    assert r["confirm"]["rate"] == 0.5 and (files / "KIT.md").read_text() == original
+
+    runner = Scripted(run4("AB"), run4("ABCD"), run4("ABC"))
+    loop = Evolve(suite_file(tmp_path), str(tmp_path / "log2"), runner, confirm=True, say=lambda s: None)
+    r = loop.try_one(Experiment(t, "## Geometry\nVec, Rot.\n"))
+    assert r["decision"] == "keep" and "; confirmed (pass rate 50% -> 75%)" in r["why"]
+    assert loop.baseline["rate"] == 0.875 and "Vec, Rot." in (files / "KIT.md").read_text()
+
+
+def test_a_held_out_suite(files, tmp_path):
+    """--holdout: a change the suite likes but that does worse on prompts it never saw is reverted; the held-out suite
+    is locked too, and can't be a target."""
+    t = parse_target(f"kit:Geometry@{files / 'KIT.md'}")
+    holdout = tmp_path / "holdout.json"
+    holdout.write_text(json.dumps({"prompts": [{"id": "X", "prompt": "x", "expected": "achieved"}]}))
+    suite = suite_file(tmp_path)
+    loop = Evolve(suite, str(tmp_path / "log"), Scripted(run4("AB"), run4("ABCD")), holdout=str(holdout),
+                  run_holdout=Scripted(run4("ABCD"), run4("A")), say=lambda s: None)
+    r = loop.try_one(Experiment(t, "## Geometry\nVec, Rot.\n"))
+    assert r["decision"] == "revert" and r["why"].startswith("worse on the held-out suite (100% -> 25%)")
+    assert loop.log.records()[0]["holdout"]["rate"] == 1.0 and r["holdout"]["rate"] == 0.25
+    loop = Evolve(suite, str(tmp_path / "log2"), Scripted(run4("AB"), run4("ABCD")), holdout=str(holdout),
+                  run_holdout=Scripted(run4("ABC"), run4("ABC")), say=lambda s: None)
+    r = loop.try_one(Experiment(t, "## Geometry\nVec, Rot.\n"))
+    assert r["decision"] == "keep" and r["why"].endswith("; held-out suite 75% -> 75%")
+    assert os.path.exists(str(tmp_path / "log2" / "holdout.lock"))
+    with open(holdout, "a", encoding="utf-8") as f:
+        f.write("\n")
+    with pytest.raises(evolve.SuiteChanged):
+        loop.check_lock()
+    assert "locked" in evolve.locked(str(holdout), also=(str(holdout),))
+
+
+def test_cold_and_warm(tmp_path):
+    """Conditions: every suite run plays each prompt cold and warm, reported apart; the bench's --memory starts a
+    prompt's memory as a copy of a frozen one (its regressions left out)."""
+    cold, warm = Scripted(run4("A", 20)), Scripted(run4("ABCD", 5))
+    both = evolve.Conditions([("cold", cold), ("warm", warm)])
+    items = both(str(tmp_path / "run"))
+    assert [i["id"] for i in items][:2] == ["cold:A", "cold:B"] and items[-1]["id"] == "warm:D"
+    out = evolve.metrics([items])
+    assert out["conditions"]["cold"]["rate"] == 0.25 and out["conditions"]["warm"]["rate"] == 1.0
+    assert out["conditions"]["warm"]["seconds"] == 20 and out["rate"] == 0.625
+    assert os.path.isdir(str(tmp_path / "run" / "warm"))
+    (tmp_path / "c.py").write_text("A = 1\n")
+    prompt = evolve.proposal_prompt(parse_target(f"const:A@{tmp_path / 'c.py'}"), "1", [], out)
+    assert "- cold: 1/4 passed" in prompt and "- warm: 4/4 passed" in prompt
+    assert "cold:B" in prompt and "evidence B 2" in prompt and "evidence B 3" not in prompt
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("bench_run", os.path.join(evolve.REPO, "bench", "run_autopilot.py"))
+    bench = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bench)
+    frozen = tmp_path / "memory" / "Game"
+    (frozen / "runs" / "r1").mkdir(parents=True)
+    (frozen / "regressions" / "r1").mkdir(parents=True)
+    (frozen / "notes.md").write_text("the door needs the lever")
+    (frozen / "runs" / "r1" / "report.json").write_text("{}")
+    pdir = tmp_path / "prompt" / "memory" / "Game"
+    pdir.mkdir(parents=True)
+    bench.seed_memory(str(frozen), str(pdir))
+    assert (pdir / "notes.md").read_text() == "the door needs the lever" and (pdir / "runs" / "r1").is_dir()
+    assert not (pdir / "regressions").exists() and (frozen / "notes.md").exists()  # (the frozen one is untouched)
