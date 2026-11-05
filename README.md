@@ -107,8 +107,8 @@ To do a clean uninstall of Autopilot, do the following steps:
 ## Roblox (experimental)
 
 Autopilot can play a Roblox place through Roblox Studio's built-in MCP server: no plugin inside Studio, a small
-connector process instead. It is new and has not yet been verified against a live Studio. [docs/roblox.md](docs/roblox.md)
-explains how to set it up, how to measure its latency, and what it can't do yet.
+connector process instead. Its tools are checked against a live Studio; it is still experimental.
+[docs/roblox.md](docs/roblox.md) explains how to set it up, how to measure its latency, and what it can't do yet.
 
 ## Contributing
 
