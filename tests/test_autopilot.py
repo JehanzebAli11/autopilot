@@ -528,18 +528,140 @@ def test_report_needs_an_episode(game, tmp_path, monkeypatch):
     assert "Reported" in s.do_report({"outcome": "CONFIRMED", "summary": "x", "evidence": []})
 
 
-def test_clock_nudges_toward_a_report(game, tmp_path, monkeypatch):
+def test_the_agent_isnt_told_the_runs_time_until_it_is_up(game, tmp_path, monkeypatch):
     from autopilot import codex
     from autopilot.agents import session
 
     monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
     s = session.Session(game, "fake", "Win", "r1")
-    s.budget = 100.0
-    assert "Wrap up" not in s.clock()
-    s.started -= 75
-    assert "Wrap up" in s.clock()
-    s.started -= 20
-    assert "nearly up" in s.clock()
+    s.budget = 3600.0
+    s.looking = True  # (an episode has played: no limit on research left to tell)
+    for used in (0, 2600, 3400):  # (it has no time to manage: shown it, an agent gave it as its reason to stop)
+        s.started = time.time() - used
+        assert s.clock() == ""
+    s.started = time.time() - (3600 - session.REPORT_SECONDS)
+    assert s.time_up() and s.clock() == session.TIME_UP
+    assert "min" not in s.clock() and "report now" in s.clock()
+    s.budget = 30.0  # (a short budget keeps a third for the report)
+    s.started = time.time() - 15
+    assert not s.time_up()
+    s.started = time.time() - 21
+    assert s.time_up()
+
+
+def test_time_up_closes_play_and_asks_for_the_report(game, tmp_path, monkeypatch):
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setenv("AUTOPILOT_SANDBOX", "off")
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    s = session.open_session(game, "fake", "Open the crate", "r1", client=FakeJev("wait"))
+    src = open(__file__, encoding="utf-8").read()
+    crate = "from autopilot.kit import *\n\n" + src[src.index("class CrateHarness"):src.index("@pytest.fixture")]
+    (tmp_path / "fake" / "runs" / "r1" / "harness.py").write_text(crate, encoding="utf-8")
+
+    # An episode that would run past the end stops there, and the agent is told why
+    s.budget = 600.0
+    s.started = time.time() - (600.0 - session.REPORT_SECONDS - 8.0)
+    t0 = time.monotonic()
+    out = s.run_harness(30)
+    assert 4 < time.monotonic() - t0 < 12, "the episode didn't end when the run's time was up"
+    assert "minutes of play are up" in out and s.episodes == 1
+    time.sleep(max(0.0, s.time_left()) + 0.1)
+
+    # Nothing more is played, nothing changes the game, and the agent is told what to do instead
+    assert s.time_up()
+    for refused in (s.run_harness(30), s.probe("print(1)"), s.restart_level()):
+        assert "Time is up" in refused and "report now" in refused, refused
+    assert s.episodes == 1
+
+    # An agent that stopped is asked for the report once: stopping again ends the run
+    assert "report now" in s.next_message()
+    assert s.next_message() == ""
+
+    # The report stays open, and the fact that time ended the run is the run's own
+    s.most_decisions = session.MIN_JEV_DECISIONS
+    s.do_report({"outcome": "not_achieved", "summary": "Stopped by the clock.", "evidence": []})
+    assert s.report is not None and "Time is up" not in s.clock()
+    assert session.finish(s, time.time(), None, "")["time_up"] is True
+
+
+def test_time_up_leaves_a_way_to_report_with_no_episode(game, tmp_path, monkeypatch):
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    s = session.Session(game, "fake", "Win", "r1")
+    s.budget = 60.0
+    s.started = time.time() - 60
+    refused = s.do_report({"outcome": "achieved", "summary": "Done.", "evidence": []})
+    assert s.report is None and "INCONCLUSIVE" in refused and "run it" not in refused
+    s.do_report({"outcome": "INCONCLUSIVE", "summary": "No episode played.", "evidence": []})
+    assert s.report is not None
+
+
+def test_a_short_run_keeps_time_to_play(game, tmp_path, monkeypatch):
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    monkeypatch.delenv("AUTOPILOT_RESEARCH_SECONDS", raising=False)
+    short = session.open_session(game, "fake", "Win", "r1", timeout=420)
+    assert short.research_budget == round((420 - session.REPORT_SECONDS) / 2)
+    usual = session.open_session(game, "fake", "Win", "r2", timeout=1800)
+    assert usual.research_budget == session.RESEARCH_SECONDS
+
+
+def test_a_probe_cut_off_at_the_end_of_the_run_says_so(game, tmp_path, monkeypatch):
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    s = session.Session(game, "fake", "Win", "r1")
+    s.budget = 600.0
+    s.started = time.time() - (600 - session.REPORT_SECONDS) + 0.3
+    s.looking = True
+    out = s.probe("time.sleep(2)", seconds=1)
+    assert "THE RUN'S TIME RAN OUT" in out and "READING AND PROBING" not in out and "Call report now" in out
+
+
+def test_an_agent_that_stops_with_time_left_isnt_asked_for_more(game, tmp_path, monkeypatch):
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    s = session.Session(game, "fake", "Win", "r1")
+    s.budget = 3600.0
+    assert s.next_message() == ""
+    s.steering.add("go left")
+    assert "go left" in s.next_message()
+
+
+def test_opus_thinks_harder_in_the_users_own_plugin(monkeypatch):
+    from autopilot import aura
+    from autopilot.agents import session
+
+    monkeypatch.delenv("AUTOPILOT_EFFORT", raising=False)
+    monkeypatch.setattr(aura, "_app", False)
+    opus = {session.MODELS[p] for p in ("anthropic", "opencode", "openrouter")}
+    assert {session.effort(name) for name in opus} == {"high"}  # (its name at each provider)
+    assert session.effort(session.MODELS["openai"]) == session.effort(None) == "medium"
+    monkeypatch.setattr(aura, "_app", True)  # (the Aura app's Autopilot)
+    assert {session.effort(name) for name in opus} == {"medium"}
+    monkeypatch.setattr(aura, "_app", False)
+    monkeypatch.setenv("AUTOPILOT_EFFORT", "low")  # (what the user set wins, on a model of any provider)
+    assert session.effort("claude-opus-5-5") == session.effort("gpt-6.1-sol") == "low"
+
+
+def test_the_claude_code_agent_has_no_turn_limit_unless_asked(monkeypatch):
+    """A run is held to its time limit: a limit on turns, which the agent isn't told of, ended one with 17 minutes left,
+    between its last edit and the report it was about to make."""
+    from autopilot.agents import claude_code
+
+    monkeypatch.delenv("AUTOPILOT_TURNS", raising=False)
+    assert claude_code.max_turns() is None
+    monkeypatch.setenv("AUTOPILOT_TURNS", "40")
+    assert claude_code.max_turns() == 40
 
 
 def test_play_exits_only_once_the_runs_data_is_sent(monkeypatch):
@@ -873,6 +995,68 @@ def test_the_summary_says_when_the_player_stops_answering_its_inputs(tmp_path):
         runtime.Runtime(game, TurningHarness(), path, client=None, max_seconds=10).run()
         text = runtime.summarize(path)
         assert ("DIDN'T ANSWER ITS INPUTS" in text) == flagged, text[:600]
+
+
+class MenuLink(FakeLink):
+    """A game with a menu: `ui_act` works on its Play button and is refused on anything else."""
+
+    def request(self, op, args=None, timeout=None):
+        from autopilot.bridge import BridgeError
+
+        if op == "ui_act":
+            if (args or {}).get("id") != "Play":
+                raise BridgeError(400, "no such element")
+            return {"acted": True}
+        return super().request(op, args, timeout)
+
+
+def test_the_trace_has_each_mouse_move_and_ui_action_inside_its_option(tmp_path):
+    class MenuHarness(Harness):
+        goal = "Start the game"
+        tempo = 2.0
+        tick_hz = 30.0
+        started = False
+
+        def observe(self, game):
+            return {"_pose": game.pose()}
+
+        def use_menu(self, game, obs):
+            game.mouse(12.34, -5.67)
+            game.mouse(0.2, 0.1)  # (too small to send: not an input)
+            game.mouse(0.0, 3.0)
+            game.ui_act(id="Play", action="click")
+            self.started = True
+            yield
+
+        def options(self, obs):
+            return [Option("use_menu", "Start from the menu", self.use_menu)]
+
+        def status(self, obs):
+            return Status("done", "started", {}) if self.started else Status()
+
+    link = MenuLink()
+    game = Game(link)
+    path = tmp_path / "t.jsonl"
+    runtime.Runtime(game, MenuHarness(), str(path), client=FakeJev("use_menu"), max_seconds=10).run()
+    events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    kinds = [e["kind"] for e in events]
+    begin, end = kinds.index("option_start"), kinds.index("option_end")
+    inputs = [{k: v for k, v in e.items() if k not in ("kind", "wall")}
+              for e in events[begin:end] if e["kind"] == "input"]
+    assert inputs == [{"key": "MouseX", "mode": "press", "value": 12.3},
+                      {"key": "MouseY", "mode": "press", "value": -5.7},
+                      {"key": "MouseY", "mode": "press", "value": 3.0},
+                      {"key": "ui", "mode": "click", "value": {"id": "Play", "action": "click"}}]
+    # (the trace says what the game was sent)
+    assert [i["value"] for i in link.inputs if i.get("key") in ("MouseX", "MouseY")] == [12.3, -5.7, 3.0]
+
+
+def test_a_refused_ui_action_is_no_input(tmp_path):
+    logged = []
+    game = Game(MenuLink(), log=lambda kind, **fields: logged.append((kind, fields)))
+    with pytest.raises(GameError):
+        game.ui_act(id="Gone", action="click")
+    assert logged == []
 
 
 def test_probes_after_an_episode_log_as_before(game, tmp_path):
@@ -1281,6 +1465,78 @@ def test_probe_writes_are_research_in_the_report(game, tmp_path, monkeypatch):
     assert report["level_modified"] and report["research_modified"] == []
 
 
+def crate_session(game, tmp_path, monkeypatch):
+    """A session whose harness.py opens the crate (the episode ends once it is open)."""
+    from autopilot import codex
+    from autopilot.agents import session
+
+    monkeypatch.setattr(codex, "MEMORY", str(tmp_path))
+    s = session.Session(game, "fake", "Open the crate", "r1", client=FakeJev("open_crate"))
+    src = open(__file__, encoding="utf-8").read()
+    (tmp_path / "fake" / "runs" / "r1").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fake" / "runs" / "r1" / "harness.py").write_text(
+        "from autopilot.kit import *\n\n" + src[src.index("class CrateHarness"):src.index("@pytest.fixture")],
+        encoding="utf-8")
+    return s
+
+
+def test_the_agent_is_told_the_level_started_over(game, tmp_path, monkeypatch):
+    """A restart undoes what a probe did, keys pressed included, so the result that had one says so, whether or not any
+    direct change was recorded: the door a probe opened with F is shut in the episode."""
+    from autopilot.agents import session
+
+    told = session.STARTED_OVER
+    s = crate_session(game, tmp_path, monkeypatch)
+    assert told not in s.run_harness(15)  # (the run's first restart: nothing had been done to the level)
+    assert told not in s.run_harness(15, restart=False)  # (play went on)
+    assert game.writes == []
+    assert s.run_harness(15).startswith(told)  # (first: it says how to read the summary)
+    assert told not in s.probe("print('read only')")
+    reply = s.restart_level()
+    assert reply.startswith("Restarted.") and told in reply
+    assert s.restart_level() == "Restarted."  # (nothing done since the last one)
+    assert s.probe("print('still fresh')").endswith("still fresh\n")
+    assert told in s.probe("game.restart()")  # (in a probe, as check_harness does)
+    assert told not in s.probe("print('told once')")
+    out = s.probe("print(check_harness(only=[]))")
+    assert "setup() ran" in out and out.endswith(told)
+
+
+def test_the_sandboxed_agent_is_told_the_level_started_over(game, tmp_path, monkeypatch):
+    """The game's restarts are counted in the child, whose results the agent reads."""
+    from autopilot import sandbox
+    from autopilot.agents import session
+
+    crate_session(game, tmp_path, monkeypatch)
+    monkeypatch.setenv("AUTOPILOT_SANDBOX", "process")
+    root = os.path.join(str(tmp_path), "fake")
+    sb = sandbox.Sandbox(game.link, FakeJev("open_crate"), "fake", "Open the crate", "r1", root, str(tmp_path))
+    try:
+        assert session.STARTED_OVER not in sb.call("probe", code="print('look')", seconds=5, timeout=60)
+        assert sb.call("run_harness", seconds=15, timeout=120).startswith(session.STARTED_OVER)
+    finally:
+        sb.close()
+
+
+def test_a_session_that_goes_on_keeps_numbering_episodes_in_the_sandbox(game, tmp_path, monkeypatch):
+    """Episodes play in the sandbox's process: counted from 0 there, a later session would write its harness and trace
+    over the first ones and report too few episodes."""
+    from autopilot.agents import session
+
+    crate_session(game, tmp_path, monkeypatch)
+    monkeypatch.setenv("AUTOPILOT_SANDBOX", "process")
+    run_dir = tmp_path / "fake" / "runs" / "r1"
+    (run_dir / "harness1.py").write_text("the first episode's", encoding="utf-8")
+    session.go_on(str(run_dir), {"episodes": 1})
+    s = session.open_session(game, "fake", "Open the crate", "r1", client=FakeJev("open_crate"))
+    try:
+        s.run_harness(15)
+        assert s.episodes == 2 and (run_dir / "harness2.py").exists()
+        assert (run_dir / "harness1.py").read_text(encoding="utf-8") == "the first episode's"
+    finally:
+        s.sandbox.close()
+
+
 def test_system_prompt_fills_the_research_and_agents_parts(game):
     from autopilot.agents import session
 
@@ -1636,6 +1892,14 @@ def test_an_exploration_plays_only_its_minutes_then_its_run_ends(game, tmp_path,
         t0 = time.monotonic()
         out = sb.call("run_harness", seconds=30, until=time.time() + 2, timeout=120)
         assert time.monotonic() - t0 < 8 and "minutes of play are up" in out, out
+    finally:
+        sb.close()
+    # The run's time is the parent's: a child going by its own default budget would close play on a longer run
+    monkeypatch.setenv("AUTOPILOT_TIMEOUT", "1")
+    sb = sandbox.Sandbox(game.link, FakeJev("wait"), "fake", "Explore", "r1", root, str(tmp_path))
+    try:
+        time.sleep(1.2)
+        assert "Time is up" not in sb.call("restart_level", timeout=120)
     finally:
         sb.close()
 

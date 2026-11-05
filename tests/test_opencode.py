@@ -40,7 +40,7 @@ def test_the_host_reaches_the_game_tools_over_localhost(session):
     server = ToolServer(session, say=said.append)
     try:
         out = post(server.url + "/probe", {"code": "print(len(game.all_actors()))\ngame.loc(game.actors('Crate')[0])"})
-        assert "2" in out and "800" in out and "[time:" in out
+        assert "2" in out and "800" in out and "min used]" in out
         assert said == ["Trying things in the game"] and session.game.link.paused
         assert "no run_harness episode" in post(server.url + "/report", {"outcome": "achieved", "summary": "Opened.",
                                                                          "evidence": ["trace1"]})
@@ -100,7 +100,7 @@ def test_the_host_config_carries_the_tools_instructions_and_model(session, monke
     assert "runs/r1/harness.py" in system and "no shell and no web" in system and "{run}" not in system
     cfg = opencode.host_config(session, "http://127.0.0.1:1/t", "claude-opus-5-5", system, fast=True)
     assert cfg["directory"] == os.path.realpath(session.root) and cfg["provider"] == "anthropic"
-    assert cfg["fast"] is True and cfg["variant"] == sessionmod.EFFORT and cfg["system"] == system
+    assert cfg["fast"] is True and cfg["variant"] == "high" and cfg["system"] == system
     assert [t["name"] for t in cfg["tools"]] == ["probe", "run_harness", "snapshot", "describe_frames",
                                                  "restart_level", "report"]
     assert cfg["tools"][0]["input"]["required"] == ["code"] and "shell" not in cfg["keep_tools"]

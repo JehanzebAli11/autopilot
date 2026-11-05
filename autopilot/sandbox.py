@@ -458,6 +458,7 @@ def child_main():
     session = Session(game, init["project"], init["prompt"], init["run_id"], say=link.status, client=RemoteJev(link))
     session.forward = lambda event: out({"type": "activity", "event": event})  # (the parent's feed has it)
     session.stop = stopped.is_set
+    session.budget = 0  # (the run's time is the parent's: it closes play itself, and gives episodes their end)
     session.recorder = RemoteRecorder(link)
     session.reader = RemoteReader(link)
     pool = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="call")
@@ -470,6 +471,9 @@ def child_main():
             elif msg["method"] == "state":
                 reply["value"] = {"episodes": session.episodes, "played": session.played,
                                   "most_decisions": session.most_decisions, "writes": runtime.jsonable(game.writes)}
+            elif msg["method"] == "go_on":  # (a later session of the run: its episodes keep their numbers)
+                session.episodes = msg["kwargs"]["episodes"]
+                reply["value"] = True
             elif msg["method"] in ("pause", "release_all"):
                 getattr(game, msg["method"])(**msg.get("kwargs", {}))
                 reply["value"] = True

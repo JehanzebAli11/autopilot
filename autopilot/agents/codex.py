@@ -65,7 +65,7 @@ describe_frames, restart_level, report) and these file tools, all from the `auto
 list_files and search (this game's folder and the kit: autopilot/KIT.md, autopilot/kit/); write_file and edit_file
 ({run}/harness.py and other files in {run}/, notes.md, lib.py: nothing else may be changed). Paths are relative to
 this game's folder. There is no shell and no web: everything you need is in this folder and the live game. The game's
-tools each return their result, then the time used of your budget. Call them one at a time: the game runs only inside
+tools each return their result. Call them one at a time: the game runs only inside
 a call. Once report says "Reported", stop.
 """
 
@@ -227,7 +227,7 @@ def run_turns(thread, message, events, session, deadline, effort):
         if events.ended not in (None, "completed"):
             return f"the model's turn {events.ended}: {events.error or 'no reason given'}"
         # (the user steered after the last tool result, with no tool call left to carry it: on as asked)
-        message = session.steer_note().strip()
+        message = session.next_message()
     return None
 
 
@@ -258,7 +258,8 @@ def implement(game, project, prompt, run_id=None, say=None, client=None, model=N
     with open(spec, "w", encoding="utf-8") as f:
         json.dump({"url": server.url, "tools": mcp_tools()}, f)
     events = Events(session, say=session.say)
-    effort = ReasoningEffort(sessionmod.EFFORT) if sessionmod.EFFORT in {e.value for e in ReasoningEffort} else None
+    level = sessionmod.effort(model)
+    effort = ReasoningEffort(level) if level in {e.value for e in ReasoningEffort} else None
     message = sessionmod.first_message(session)
 
     done = sessionmod.watch_steering(session)
