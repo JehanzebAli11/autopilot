@@ -110,6 +110,11 @@ Autopilot can play a Roblox place through Roblox Studio's built-in MCP server: n
 connector process instead. Its tools are checked against a live Studio; it is still experimental.
 [docs/roblox.md](docs/roblox.md) explains how to set it up, how to measure its latency, and what it can't do yet.
 
+## Regression replay
+
+Every CONFIRMED verification is kept as a harness that `autopilot regress` replays without a language model, so a
+change that breaks something that used to work shows up. [docs/regress.md](docs/regress.md) explains it.
+
 ## Contributing
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up a development environment, run the tests, and add support for a new engine. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).

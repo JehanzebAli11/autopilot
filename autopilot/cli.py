@@ -903,6 +903,60 @@ def cmd_run(link, args):
     return 0 if (result.get("status") or {}).get("state") == "done" else 1
 
 
+def regress_on(game, project, args, say=print):
+    """Replay the project's regressions (or --regressions') on game without a model (autopilot/regress.py): 0 when
+    every one passes. --json: the results there."""
+    from . import regress
+
+    root = codexmod.project_dir(project)
+    base = getattr(args, "regressions", None) or regress.folder(project, root)
+    regs = regress.listing(base) if os.path.isdir(base) else []
+    if not regs:
+        say(f"No regressions at {base}")
+        summary = regress.summary([])
+    else:
+        say(f"Replaying {len(regs)} regression(s) from {base}, without a model")
+        results = regress.replay_all(game, regs, project_root=root, frozen_lib=getattr(args, "frozen_lib", False),
+                                     seconds=getattr(args, "seconds", None), say=say)
+        summary = regress.summary(results)
+        say(f"{summary['passed']}/{summary['total']} passed")
+    if getattr(args, "json", None):
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=1)
+    return 0 if summary["passed"] == summary["total"] else 1
+
+
+def cmd_regress(link, args):
+    project = codexmod.project_of(link.hello)
+    game = Game(link, codexmod.Codex.for_project(project))
+    try:
+        return regress_on(game, project, args)
+    finally:
+        if getattr(args, "game_process", None) is not None:
+            processes.kill(args.game_process)
+
+
+def launch_headless(args, url):
+    """Start the project's game headless (its engine's launch_command; Roblox: the connector to Studio), connecting
+    to url, a moment after this process listens. The Popen is kept on args.game_process."""
+    eng, path = engines.find_project(args.path)
+    if not eng:
+        raise SystemExit(f"No Unreal, Unity, Godot or Roblox project at {args.path}")
+    log = os.path.join(HERE, "logs", f"regress-{time.strftime('%Y%m%d-%H%M%S')}.log")
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    cmd = eng.launch_command(path, url, log, exe=getattr(args, "engine", None))
+
+    def start():
+        time.sleep(1.5)
+        import subprocess
+
+        args.game_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             cwd=HERE if eng.name == "roblox" else None, **processes.GROUP)
+        processes.track(args.game_process)
+
+    threading.Thread(target=start, daemon=True).start()
+
+
 def decision_key_missing():
     """Why a run with the user's own keys can't start (its decision model has no key; a run through Aura needs none),
     or None. Told to the user's own agent (`autopilot mcp`): the key goes in the file, never into its conversation."""
@@ -1108,6 +1162,18 @@ def parser():
     r.add_argument("--no-restart", action="store_true", help="go on from where the game is")
     r.add_argument("--aura", action="store_true",
                    help="sign in with Aura: run on your Aura plan instead of your own keys")
+    rg = sub.add_parser("regress", help="replay the regressions (harnesses of CONFIRMED claims) without a model: "
+                                        "starts the game headless, or waits for the editor (--no-launch)")
+    rg.add_argument("--project", dest="path", help=project_help)
+    rg.add_argument("--regressions", help="a regressions folder (default: the project's, AUTOPILOT_REGRESSIONS or "
+                                          "memory/<project>/regressions)")
+    rg.add_argument("--seconds", type=float, help="each replay's longest episode (default: 1.5x the recorded one)")
+    rg.add_argument("--frozen-lib", action="store_true",
+                    help="use each regression's own lib.py snapshot, not the project's lib.py now")
+    rg.add_argument("--json", help="write the results there")
+    rg.add_argument("--port", type=int, default=8765)
+    rg.add_argument("--engine", help="the game's executable (default: the engine adapter's)")
+    rg.add_argument("--no-launch", action="store_true", help="don't start the game: wait for the editor's plugin")
     li = sub.add_parser("login", help="sign in to Aura on its website (for runs with Aura without the Aura app)")
     li.add_argument("--server", help=SERVER_HELP)
     lo = sub.add_parser("logout", help="sign out of Aura (the sign-in `autopilot login` kept)")
@@ -1173,12 +1239,14 @@ def main(argv=None):
 
         args.control = Control()
         extra = {"control": args.control.url}
+    if args.cmd == "regress" and args.path and not args.no_launch:
+        launch_headless(args, f"ws://127.0.0.1:{args.port}/v1/bridge")
     print(f"Waiting for the plugin on ws://127.0.0.1:{args.port}/v1/bridge ...")
     link = bridge.serve_local(port=args.port, role="service" if args.cmd == "serve" else "cli", announce_as=announce_as,
                               extra=extra)
     print(f"Connected: {link.hello.get('project')} ({link.hello.get('host')}, {engines.for_hello(link.hello).title})")
     link = LiveLink(link)
-    return {"play": cmd_play, "run": cmd_run, "serve": cmd_serve}[args.cmd](link, args)
+    return {"play": cmd_play, "run": cmd_run, "serve": cmd_serve, "regress": cmd_regress}[args.cmd](link, args)
 
 
 if __name__ == "__main__":

@@ -89,6 +89,10 @@ test place with its MCP server on. Prompts run one at a time (one Studio, one pl
 debug ModuleScript, all tagged with CollectionService. The suite's expected verdicts come from the place's code: none of
 them has been run against Studio yet.
 
+Every CONFIRMED verification on the place is kept as a regression that `autopilot regress --project
+examples/roblox_testplace` replays without a model (through the connector, so Studio must be open): see
+[regress.md](regress.md).
+
 ## Known limits
 
 - **Latency.** Every read and input is an MCP round trip. Measured on a Mac (`tools/roblox_latency.py`, a batched
