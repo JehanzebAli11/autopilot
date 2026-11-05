@@ -1,4 +1,4 @@
-"""A tiny game for test_regress.py, behind a link as a plugin would answer it: no engine, no
+"""A tiny game for test_regress.py and test_evolve.py, behind a link as a plugin would answer it: no engine, no
 language model, no Jev (FakeJev picks). Its game clock runs with the wall clock, as a live game's does.
 
 The game: a hero on a line with a coin and a door ahead of it, and a coin count. `move` {"to": "Coin"} walks the hero
@@ -6,9 +6,11 @@ up to the thing, stopping a step short of it (28 cm short of the coin, 56 cm of 
 hero back at the start. Reads are rc properties, as Unreal's plugin answers them.
 
 The harnesses import the project's `lib` (lib.arrived(distance_cm)) and `tuning` (tuning.SETTLE_TICKS) from a memory
-folder the test writes, so a change to lib.py changes whether a saved regression still passes.
+folder the test writes, so a change to either changes how the suite goes (autopilot evolve's lib: and const: targets)
+and whether a saved regression still passes.
 """
 
+import concurrent.futures as futures
 import os
 import shutil
 import sys
@@ -99,6 +101,14 @@ HARNESSES = {"coin": GO.replace("__thing__", "coin").replace("__Thing__", "Coin"
              "door": GO.replace("__thing__", "door").replace("__Thing__", "Door"),
              "count": COUNT}
 LIKES = {"coin": "go_to_coin", "door": "go_to_door", "count": "check_coins"}
+
+SUITE = {"prompts": [
+    {"id": "A", "prompt": "Verify that walking to the coin brings the player next to it", "expected": "CONFIRMED",
+     "harness": "coin"},
+    {"id": "B", "prompt": "Reach the door", "expected": "achieved", "harness": "door"},
+    {"id": "C", "prompt": "Verify that the player starts with 0 coins", "expected": "CONFIRMED", "harness": "count"},
+]}
+
 
 class World:
     """The game, as the link a Game reads it through (request, post, hello, game_time). calls: every (op, args)."""
@@ -220,3 +230,56 @@ def play(run_dir, which, n=1, max_seconds=3.0, memory=None):
         world.close()
     shutil.copyfile(path, os.path.join(run_dir, f"harness{n}.py"))
     return result
+
+
+def outcome(item, result):
+    done = (result.get("status") or {}).get("state") == "done"
+    if item["prompt"].lower().startswith("verify"):
+        return "CONFIRMED" if done else "INCONCLUSIVE"
+    return "achieved" if done else "not_achieved"
+
+
+class SimSuite:
+    """evolve's run_suite on the tiny game: every prompt at once (threads), each on a world of its own; tokens a
+    fixed 1000 a prompt. spans: (start, end) of each prompt, by run."""
+
+    def __init__(self, memory, suite=SUITE, max_seconds=3.0):
+        self.memory, self.suite, self.max_seconds = memory, suite, max_seconds
+        self.spans = []
+        self.lock = threading.Lock()
+
+    def __call__(self, out):
+        fresh_imports(self.memory)
+        harnesses = {}
+        for item in self.suite["prompts"]:  # (loaded one by one: `import lib` once per suite run)
+            folder = os.path.join(out, item["id"])
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, "harness.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(HARNESSES[item["harness"]])
+            harnesses[item["id"]] = runtime.load_harness(path)
+        spans = []
+
+        def one(item):
+            t0 = time.monotonic()
+            game, world, _ = connect()
+            try:
+                game.restart()
+                game.pause(False)
+                rt = runtime.Runtime(game, harnesses[item["id"]], os.path.join(out, item["id"], "trace1.jsonl"),
+                                     client=FakeJev(LIKES[item["harness"]]), max_seconds=self.max_seconds)
+                result = rt.run()
+            finally:
+                world.close()
+            t1 = time.monotonic()
+            with self.lock:
+                spans.append((t0, t1))
+            got = outcome(item, result)
+            return {"id": item["id"], "prompt": item["prompt"], "expected": item["expected"], "got": got,
+                    "correct": got == item["expected"], "seconds": round(t1 - t0, 3), "tokens": 1000,
+                    "summary": (result.get("status") or {}).get("note") or result.get("reason")}
+
+        with futures.ThreadPoolExecutor(len(self.suite["prompts"])) as pool:
+            results = list(pool.map(one, self.suite["prompts"]))
+        self.spans.append(spans)
+        return results
