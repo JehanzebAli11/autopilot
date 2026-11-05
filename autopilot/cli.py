@@ -1226,6 +1226,10 @@ def main(argv=None):
 
     load_dotenv(os.path.join(HERE, ".env"))
     load_user_keys()
+    if args.cmd == "evolve":  # (no game link of its own, and not a run: the bench starts each prompt's brain and game)
+        from . import evolve
+
+        return evolve.main(args)
     # An Autopilot the Aura app starts (AUTOPILOT_AURA_URL set for it) says where it listens under Aura's own name,
     # which only plugins set to Use with Aura read; one started with --aura is the user's own Autopilot, found as any
     # other
@@ -1233,10 +1237,6 @@ def main(argv=None):
     announce_as = aura.BRAIN_FILE if aura.from_app() else bridge.BRAIN_FILE
     # --aura: runs go through Aura whatever the first-run setup says (Aura's own server unless AUTOPILOT_AURA_URL names
     # another); else the setup's choice decides, before every run (autopilot/account.py)
-    if args.cmd == "evolve":  # (no game link of its own: the bench starts each prompt's)
-        from . import evolve
-
-        return evolve.main(args)
     if getattr(args, "aura", False):
         aura.use_default()
     account.fix_at_start()
