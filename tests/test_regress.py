@@ -105,7 +105,7 @@ def test_session_finish_saves_the_regression(tmp_path, memory, monkeypatch):
         report=dict(report), run_dir=run_dir, run_id="run-1", project="Tiny", prompt=report["prompt"],
         episodes=1, tool_seconds=0.0, game=types.SimpleNamespace(writes=[]), alerts=[], researcher=None,
         reader=None, findings=[], index_was_running=False, root=memory, out_of_time=lambda: False,
-        indexer=lambda: None, note=lambda text: None)
+        indexer=lambda: None, note=lambda text: None, reported_at_time_up=False)
     out = sessionmod.finish(fake, 0.0, None, "")
     assert out["outcome"] == "CONFIRMED" and seen == ["CONFIRMED"]
     fake.report = dict(report, outcome="DENIED")
