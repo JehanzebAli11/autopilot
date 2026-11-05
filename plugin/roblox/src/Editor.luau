@@ -707,8 +707,14 @@ function Editor:stopPlaying(): (boolean, string?)
 	if not self.playing and not self.starting then
 		return true, nil
 	end
-	self:_pipeSend({ to = "server", type = "request", id = "end_test", op = "end_test", args = Json.object() })
+	-- (asked again every 2 s: a play session from before this connection has its server join this pipe only after
+	-- a second or two, and a request sent before then reaches no one)
+	local askedAt = -math.huge
 	local ok = self:_waitFor(function()
+		if now() - askedAt >= 2 then
+			askedAt = now()
+			self:_pipeSend({ to = "server", type = "request", id = "end_test", op = "end_test", args = Json.object() })
+		end
 		return not self.playing and not self.starting
 	end, 30)
 	if not ok then

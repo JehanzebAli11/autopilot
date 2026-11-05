@@ -431,7 +431,9 @@ function Ui.inputCaps(o: any?): any
 	table.insert(notes, "Point before clicking (pointer): the mouse buttons press where the pointer is (the middle of "
 		.. "the view until it is set); ui_act points at an element's middle by itself.")
 	table.insert(notes, "Escape, and ButtonB, ButtonStart and DPadUp on a console, are Roblox's own (its menus): a "
-		.. "press of one is refused (409).")
+		.. "press of one is refused (409).  So are One to Nine while Roblox's backpack hotbar shows: equip a Tool with "
+		.. "rc call on the character's Humanoid, EquipTool {tool: its path in the player's Backpack}, and put it away "
+		.. "with UnequipTools.")
 	if touch then
 		table.insert(notes, "Studio simulates a touch device: the game gets touches (the touch request: tap, swipe, "
 			.. "a drag on Roblox's on-screen thumbstick walks), the camera turns by a finger's drag on the right half "

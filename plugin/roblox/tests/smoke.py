@@ -253,13 +253,21 @@ def main():
         check("view: the ramp's top slopes 27 degrees, uphill to the west (kit yaw -90)", ramp is not None
               and abs(ramp.get("top_slope_degrees", 0) - 27) <= 3 and abs(ramp.get("uphill", {}).get("yaw", 0) + 90) <= 5,
               str(ramp))
-    req("key", {"key": "One", "mode": "press"})  # (the hotbar's first tool: the Torch)
+    # (One to Nine are the backpack hotbar's, Roblox's own: refused, as Escape; a Tool is equipped through rc)
+    try:
+        req("key", {"key": "One", "mode": "press"})
+        check("One (the backpack hotbar's) is refused", False)
+    except BridgeError as e:
+        check("One (the backpack hotbar's) is refused", e.status == 409, e.error)
+    humanoid = ctx["character"] + "/Humanoid"
+    req("rc", {"verb": "call", "body": {"objectPath": humanoid, "functionName": "EquipTool",
+                                        "parameters": {"tool": ctx["controller"] + "/Backpack/Torch"}}})
     held = until(lambda: req("view", {"max_count": 30})["held"], 3)
     check("view held: the Torch equipped, in a hand", bool(held) and held[0]["name"] == "Torch"
           and "Hand" in held[0].get("attached_at", "") and held[0]["look"]["parts"] == ["Handle"], str(held))
     check("view: what is held isn't among the things seen", not any(t["name"] == "Torch" for t in req("view", {
         "max_count": 30})["visible"]))
-    req("key", {"key": "One", "mode": "press"})  # (put away)
+    req("rc", {"verb": "call", "body": {"objectPath": humanoid, "functionName": "UnequipTools", "parameters": {}}})
     _put(req, (-58, 3, 9))  # (beside the Lookout's south wall, z 6)
     req("move", {"direction": {"X": 1, "Y": 0, "Z": 0}, "seconds": 0.8})  # (kit +X is Roblox -z: into the wall)
     _face(req, "/Workspace/Grove/Lookout")
