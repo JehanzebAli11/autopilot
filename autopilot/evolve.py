@@ -109,9 +109,14 @@ class Target:
     var: Optional[str] = None
     spec: str = ""
 
-    def read(self):
+    def raw(self):
+        """The file's text exactly as it is on disk (what a revert writes back)."""
         with open(self.path, encoding="utf-8", newline="") as f:
             return f.read()
+
+    def read(self):
+        """The file's text with \n line endings (a Windows checkout may have \r\n: render() writes those back)."""
+        return self.raw().replace("\r\n", "\n")
 
     def span(self, text):
         return {"prompt": self._prompt_span, "kit": self._kit_span, "const": self._const_span,
@@ -138,7 +143,7 @@ class Target:
             new = new.strip()
         out = text[:a] + new + text[b:]
         self.check(text, out, new)
-        return out
+        return out.replace("\n", "\r\n") if "\r\n" in self.raw() else out
 
     # prompt: a paragraph of a module-level triple-quoted string
 
@@ -317,6 +322,15 @@ def parse_target(spec, lib=None, repo=REPO):
     return t
 
 
+def _rel(path, base):
+    """path relative to base when it is inside it, else None (also across Windows drives, where relpath raises)."""
+    try:
+        rel = os.path.relpath(path, base)
+    except ValueError:
+        return None
+    return None if rel == ".." or rel.startswith(".." + os.sep) else rel
+
+
 def locked(path, also=(), repo=REPO):
     """Why path may not be a target (the bench, the tests, a regression, the suite, the log), or None."""
     real = os.path.realpath(path)
@@ -326,8 +340,8 @@ def locked(path, also=(), repo=REPO):
         rp = os.path.realpath(p)
         if real == rp or real.startswith(rp.rstrip(os.sep) + os.sep):
             return f"{path} is locked (the suite or the experiments log)"
-    rel = os.path.relpath(real, os.path.realpath(repo))
-    if not rel.startswith(".."):
+    rel = _rel(real, os.path.realpath(repo))
+    if rel is not None:
         first = rel.split(os.sep)[0]
         if first in LOCKED_DIRS:
             return f"{path} is locked ({first}/ is the measure, not a target)"
@@ -736,12 +750,12 @@ class Evolve:
         base = self.start()
         t = exp.target
         record = {"kind": "experiment", "when": _now(), "target": t.spec or f"{t.kind}:{t.selector}",
-                  "file": os.path.relpath(t.path, REPO) if not os.path.relpath(t.path, REPO).startswith("..")
-                  else t.path, "note": exp.note, "baseline": _short(base), "suite_sha256": self.lock["sha256"]}
+                  "file": (_rel(t.path, REPO) or t.path).replace(os.sep, "/"), "note": exp.note,
+                  "baseline": _short(base), "suite_sha256": self.lock["sha256"]}
         why_locked = locked(t.path, also=(self.suite, self.out))
         if why_locked:
             return self.log.add(dict(record, decision="refused", why=why_locked))
-        original = t.read()
+        original = t.raw()
         current = t.current()
         text, note = exp.text, exp.note
         if text is None and exp.propose is not None:
@@ -757,8 +771,9 @@ class Evolve:
         except TargetError as e:
             return self.log.add(dict(record, decision="invalid", why=str(e)))
         rel = record["file"]
-        record["diff"] = "".join(difflib.unified_diff(original.splitlines(keepends=True),
-                                                      new_file.splitlines(keepends=True), f"a/{rel}", f"b/{rel}"))
+        record["diff"] = "".join(difflib.unified_diff(t.read().splitlines(keepends=True),
+                                                      new_file.replace("\r\n", "\n").splitlines(keepends=True),
+                                                      f"a/{rel}", f"b/{rel}"))
         n = self.log.next_n()
         self.say(f"Experiment {n}: {record['target']}" + (f" ({note})" if note else ""))
         self._pending(t, original, n)

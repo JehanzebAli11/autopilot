@@ -443,3 +443,29 @@ def test_the_command(files, tmp_path, monkeypatch, capsys):
     assert evolve.main(cli.parser().parse_args(["evolve", "--suite", suite])) == 1  # (no experiments)
     args.candidates = str(tmp_path / "missing.json")
     assert evolve.main(args) == 1
+
+
+def test_windows_line_endings_and_drives(files, tmp_path, monkeypatch):
+    """A Windows checkout's \\r\\n files (.gitattributes: text=auto) are read and changed as their \\n text, and written
+    back with \\r\\n; a file on another drive than the repository's isn't refused, and is logged by its own path."""
+    crlf = files / "crlf.py"
+    crlf.write_bytes(PROMPTS.replace("\n", "\r\n").encode())
+    t = parse_target(f"prompt:2@{crlf}")
+    assert t.current() == "Research first: read the codex, then probe.\n  Keep each probe short."
+    new = t.render("Research first.")
+    assert "Research first.\r\n\r\nRules:" in new and "\n" not in new.replace("\r\n", "")
+    kit = files / "KIT_crlf.md"
+    kit.write_bytes(KIT.replace("\n", "\r\n").encode())
+    k = parse_target(f"kit:Controllers@{kit}")
+    assert k.current() == "## Controllers\nwalk_to, look_at.\n\n"
+    loop = Evolve(suite_file(tmp_path), str(tmp_path / "log"), FakeAgent(files), say=lambda s: None)
+    r = loop.try_one(Experiment(t, "Research first."))
+    assert r["decision"] == "revert" and crlf.read_bytes() == PROMPTS.replace("\n", "\r\n").encode()  # (byte for byte)
+    assert "-Research first: read the codex, then probe.\n" in r["diff"] and "\r" not in r["diff"]
+
+    def other_drive(path, start=os.curdir):
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+
+    monkeypatch.setattr(evolve.os.path, "relpath", other_drive)
+    assert evolve.locked(str(files / "lib.py")) is None
+    assert evolve._rel(str(files / "lib.py"), evolve.REPO) is None
