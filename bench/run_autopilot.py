@@ -3,7 +3,7 @@
     python bench/run_autopilot.py --project <copy>/Game.uproject --prompt "Open the gate"
     python bench/run_autopilot.py --project <copy>/Game.uproject --suite bench/example.json [--only A,B] [--parallel 2]
         [--codex memory/<project>/codex] [--warm <memory dir>] [--minutes 30] [--out <dir>] [--model ...]
-        [--agent opencode|claude|codex]
+        [--agent opencode|claude|codex] [--lib lib.py] [--memory memory/<project>]
 
 --project is any engine's project: an Unreal .uproject, a Unity project folder or a Godot project folder. The game
 runs headless as its engine's adapter says (Engine.launch_command): Unreal `-game -nullrhi` (or a packaged build given
@@ -15,9 +15,10 @@ A suite is a JSON file: {"prompts": [{"id": "A", "prompt": "...", "expected": "C
 optional; bench/example.json shows the format).
 
 Each prompt gets its own folder and its own memory (AUTOPILOT_MEMORY): cold by default (only the project's codex, which
-comes from the project's files, not from play, is copied in), or --warm <dir>, shared one prompt after another
-(notes.md, lib.py and earlier runs carry over). A brain (`python -m autopilot play`) listens on its own port; the game
-runs headless and connects to it. Results go to bench/results/<time>/summary.json.
+comes from the project's files, not from play, is copied in, and --lib's lib.py), or a copy of --memory's folder (a
+warm start: what earlier runs learned, frozen, the same for every prompt), or --warm <dir>, shared one prompt
+after another (notes.md, lib.py and earlier runs carry over). A brain (`python -m autopilot play`) listens on its own
+port; the game runs headless and connects to it. Results go to bench/results/<time>/summary.json.
 
 Each brain has its own empty settings folder (<prompt>/settings), so runs use the keys in .env and the environment:
 never this machine's first-run setup (an Aura choice would send every prompt through Aura, restoring and saving the
@@ -62,8 +63,12 @@ def run_one(item, args, root):
     memory = os.path.abspath(args.warm or os.path.join(work, "memory"))  # (see codex.MEMORY)
     pdir = os.path.join(memory, project)
     os.makedirs(pdir, exist_ok=True)
+    if args.memory and not args.warm:
+        seed_memory(args.memory, pdir)
     if args.codex and not os.path.isdir(os.path.join(pdir, "codex")):
         shutil.copytree(args.codex, os.path.join(pdir, "codex"))
+    if args.lib and not args.warm:  # (each prompt starts with this lib.py: autopilot evolve's lib: targets)
+        shutil.copyfile(args.lib, os.path.join(pdir, "lib.py"))
     port = free_port()
     started = time.time()
     # (the brain's own budget follows --minutes too: without it a run believes it has the default 30 whatever the
@@ -113,8 +118,16 @@ def run_one(item, args, root):
             "correct": (got == expected) if expected else None, "summary": report.get("summary", ""),
             "evidence": report.get("evidence", [])[:4], "seconds": round(time.time() - started),
             "implementer_seconds": report.get("seconds"), "episodes": report.get("episodes"),
-            "cost_usd": report.get("cost_usd"), "turns": report.get("turns"), "agent": report.get("agent"),
+            "cost_usd": report.get("cost_usd"), "tokens": report.get("tokens"), "turns": report.get("turns"),
+            "agent": report.get("agent"),
             "dir": work}
+
+
+def seed_memory(src, pdir):
+    """A prompt's memory starts as a copy of src, a project's memory folder (notes.md, lib.py, runs/, codex/): what
+    earlier runs learned, frozen, so every prompt (and every evolve experiment) starts warm from the same place. Its
+    regressions aren't copied."""
+    shutil.copytree(src, pdir, dirs_exist_ok=True, ignore=shutil.ignore_patterns("regressions", "__pycache__"))
 
 
 def fps_cap(eng, fps):
@@ -137,6 +150,9 @@ def main():
     p.add_argument("--parallel", type=int, default=1)
     p.add_argument("--codex", help="a codex folder to start each prompt's memory with")
     p.add_argument("--warm", help="a memory folder the prompts share, one after another")
+    p.add_argument("--lib", help="a lib.py each prompt's memory starts with (not with --warm)")
+    p.add_argument("--memory", help="a project's memory folder (memory/<project>) each prompt's memory starts as a "
+                                    "copy of: a warm start, the same for every prompt (not with --warm)")
     p.add_argument("--minutes", type=float, default=30)
     p.add_argument("--engine", help="the executable that runs the game (default: the engine adapter's)")
     p.add_argument("--map")

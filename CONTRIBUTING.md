@@ -86,6 +86,8 @@ autopilot login | logout                     # sign in to Aura on its website (w
 autopilot connect claude|codex [--remove]    # set up your own Claude Code or Codex to playtest through Autopilot,
                                              # on your own plan (its MCP server, `autopilot mcp`; a skill; a describer)
 autopilot mcp                                # that MCP server (your agent starts it)
+autopilot evolve --suite <suite> --project path/to/Game --candidates <file>
+                                             # keep a change only if a locked suite does better
 autopilot uninstall [--keep-memory]          # remove Autopilot from this computer and its memories, here and with Aura
                                              # (--keep-memory keeps them; shared run data already sent stays)
 ```
@@ -164,6 +166,7 @@ The variables:
 | `autopilot/runtime.py`                                                                         | plays a harness: asks Jev, runs the chosen action, writes the trace                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `autopilot/kit/`                                                                               | what harnesses are written with: game reads and inputs, controllers (`walk_to`, `look_at`, ...), the `Harness` contract                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `autopilot/KIT.md`                                                                             | the kit's reference, as the agent reads it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `autopilot/evolve.py`                                                                          | `autopilot evolve`: one change at a time to the prompt, the kit's reference, a constant or lib.py, kept only if a locked bench suite does better                                                                                                                                                                                                                                                                                                                                                                          |
 | `autopilot/codex.py`                                                                           | builds a project's codex (its code and assets as text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `autopilot/engines/`                                                                           | one adapter per engine: project files, coordinate frames, headless launch                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `autopilot/sandbox.py`                                                                         | runs model-written code in a separate process                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -200,6 +203,51 @@ The agent's instructions (`autopilot/agents/session.py`, `SYSTEM`) and the kit's
 well Autopilot plays. Changes to them are judged by results: describe in the pull request which games and prompts you ran
 before and after, and how the outcomes changed. `bench/run_autopilot.py` runs a suite of prompts against a headless copy of
 a game. Report results on games you didn't tune the change on.
+
+## Evolve
+
+`autopilot evolve` searches for such changes for you, in the manner of autoresearch: one change at a time, measured on a
+locked bench suite, kept only when the suite does better, everything logged.
+
+```bash
+autopilot evolve --show "prompt:Rules"            # what a target holds now
+autopilot evolve --suite bench/example.json --project path/to/Game --candidates experiments.json [--parallel 2]
+    [--repeats 2] [--noise 3] [--holdout held-out.json] [--memory memory/<project> [--cold-and-warm]]
+    [--regressions memory/<project>/regressions] [--out bench/evolve]
+autopilot evolve --suite bench/example.json --project path/to/Game --target "kit:The plan" --propose 5
+    [--direction where-it-fails.md]
+```
+
+- **Targets**, one per experiment: `prompt:<n or first words>` (a paragraph of `SYSTEM`), `kit:<heading>` (a section of
+  KIT.md), `const:<module.NAME>` (a module-level constant, e.g. `const:kit.control.SONAR_EVERY`), `lib:<function>` (a
+  function of the project's lib.py); `@file` names another file. A change is checked before it runs (the prompt keeps its
+  `{format}` fields, a constant's value is a literal, the file compiles), and nothing under `bench/`, `tests/` or a
+  regressions folder can be one.
+- **The decision**: each experiment runs the suite (`bench/run_autopilot.py`, `--parallel` prompts at a time, averaged
+  over `--repeats`) and keeps the change only when the pass rate rises, or, at an equal pass rate, time or tokens fall by
+  `--min-gain` (2%) without the other rising as much. With `--regressions` (it replays them with `autopilot regress`), a
+  change that makes a regression fail that passed before is reverted too. Otherwise the file is put back byte for byte.
+- **Noise**: runs vary, and on a small suite one prompt flipping looks like a 10% win. The baseline is measured
+  `--noise` times (3 by default; 0: off), and a change must beat that spread: a pass rate must rise by more than the
+  baseline's own spread, and time or tokens must fall by more than theirs. A change that wins is measured again and kept
+  only if it wins again (`--no-confirm` turns that off).
+- **Out of sample**: `--holdout` names a second suite (locked too) that proposals never see: a change the suite likes
+  but that does worse there is reverted. Use other prompts and, better, another game.
+- **Cold and warm**: by default each prompt starts with a fresh memory (cold: a game Autopilot has never played).
+  `--memory memory/<project>` starts each one from a copy of that frozen memory instead (warm: what earlier runs
+  learned, failures included, the same for every experiment), and `--cold-and-warm` measures both, reported apart.
+  The bench takes the same `--memory`.
+- **The changes** come from a candidates file (`{"experiments": [{"target", "text" | "file", "note"}]}`) or from a model
+  (`--target ... --propose N`), shown the target, the suite's misses grouped by how they went wrong (with their
+  evidence) and what was tried on it before. `--direction` gives it your own notes on where Autopilot fails, ahead of
+  the numbers: the loop measures ideas carefully; where to look is still a person's call. Structural ideas (a new kind
+  of controller) belong in a candidates file, written by hand, for the loop to measure.
+- **The log**, in `--out` (default `bench/evolve/`): `experiments.jsonl` and `experiments.md` (a row each: the target, the
+  diff, the metrics before and after, the decision and why) and `diffs/`. The suite's hash is locked in `suite.lock` on
+  the first run: a changed suite is refused (`--relock` starts a new lock).
+- **Safety**: files are written in one step; Ctrl+C puts the target back at once, and an experiment the loop was killed
+  in is put back when it next starts. Kept changes stay in the working tree as ordinary edits: review them, and report
+  results on games the suite didn't tune them on, as above.
 
 ## Adding an engine
 
