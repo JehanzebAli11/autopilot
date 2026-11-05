@@ -942,25 +942,31 @@ def cmd_regress(link, args):
             processes.kill(args.game_process)
 
 
-def launch_headless(args, url):
-    """Start the project's game headless (its engine's launch_command; Roblox: the connector to Studio), connecting
-    to url, a moment after this process listens. The Popen is kept on args.game_process."""
+def launch_headless(args, url, say=print):
+    """Start the project's game headless (its engine's launch_command), connecting to url, a moment after this process
+    listens; the Popen is kept on args.game_process. False when the engine has no headless game (Roblox Studio): then
+    nothing starts, and the editor's plugin is waited for, as with --no-launch."""
     eng, path = engines.find_project(args.path)
     if not eng:
         raise SystemExit(f"No Unreal, Unity, Godot or Roblox project at {args.path}")
     log = os.path.join(HERE, "logs", f"regress-{time.strftime('%Y%m%d-%H%M%S')}.log")
     os.makedirs(os.path.dirname(log), exist_ok=True)
-    cmd = eng.launch_command(path, url, log, exe=getattr(args, "engine", None))
+    try:
+        cmd = eng.launch_command(path, url, log, exe=getattr(args, "engine", None))
+    except NotImplementedError as e:
+        say(f"{e}. Waiting for the plugin instead: open the project in its editor, with the plugin connecting to {url}")
+        return False
 
     def start():
         time.sleep(1.5)
         import subprocess
 
         args.game_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                             cwd=HERE if eng.name == "roblox" else None, **processes.GROUP)
+                                             **processes.GROUP)
         processes.track(args.game_process)
 
     threading.Thread(target=start, daemon=True).start()
+    return True
 
 
 def decision_key_missing():

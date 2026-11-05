@@ -167,3 +167,31 @@ def test_cli_regress_replays_the_project_regressions(tmp_path, memory, monkeypat
     # none at all: nothing fails
     args = cli.parser().parse_args(["regress", "--regressions", str(tmp_path / "none")])
     assert cli.regress_on(None, "Tiny", args) == 0
+
+
+def test_a_project_without_a_headless_game_waits_for_its_plugin(tmp_path, monkeypatch):
+    """--project on an engine with no headless game (Roblox Studio's) says so and waits for the plugin, as --no-launch
+    does, instead of failing; one that has one is started."""
+    from autopilot import engines
+
+    class Studio(engines.get("godot").__class__):
+        name = "studio"
+
+        def launch_command(self, project, url, log, map=None, exe=None):
+            raise NotImplementedError("Studio has no headless game")
+
+    said, started = [], []
+    monkeypatch.setattr(engines, "find_project", lambda path: (Studio(), str(tmp_path)))
+    args = cli.parser().parse_args(["regress", "--project", str(tmp_path)])
+    assert cli.launch_headless(args, "ws://127.0.0.1:9/v1/bridge", say=said.append) is False
+    assert "Studio has no headless game. Waiting for the plugin instead" in said[0]
+    assert not hasattr(args, "game_process")
+
+    class Headless(Studio):
+        def launch_command(self, project, url, log, map=None, exe=None):
+            return ["game", "--connect", url]
+
+    monkeypatch.setattr(engines, "find_project", lambda path: (Headless(), str(tmp_path)))
+    monkeypatch.setattr(cli.threading, "Thread", lambda target, daemon: types.SimpleNamespace(
+        start=lambda: started.append(target)))
+    assert cli.launch_headless(args, "ws://127.0.0.1:9/v1/bridge", say=said.append) is True and len(started) == 1
