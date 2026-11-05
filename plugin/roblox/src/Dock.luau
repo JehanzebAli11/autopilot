@@ -817,6 +817,10 @@ function Dock:_renderLive()
 	if now then
 		label(l, now, { color = if self.waitingShown then C.warn else C.muted, size = 14, name = "Now" })
 	end
+	-- (the other plugins keep the person's input out of the game during a run; Roblox gives a plugin no way to tell
+	-- the person's input from its own)
+	label(l, "Hands off the game view while Autopilot plays: your clicks and keys there reach the game too.",
+		{ color = C.muted, size = 12, name = "HandsOff" })
 	local row = frame(l, "Row", true)
 	button(row, "Stop", function()
 		ed:stopRun()

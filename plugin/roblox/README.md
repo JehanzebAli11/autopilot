@@ -274,6 +274,10 @@ server (`autopilot/studio_mcp.py`) and answers `capture` and `record` from it: r
 - **No headless or command-line runs** (CI): a Roblox game runs only in Studio (or Roblox's clients). Bench runs
   (`bench/run_autopilot.py`) need another engine.
 - **One level.** A place is one level; teleporting between a universe's places isn't played.
+- **Your input reaches the game during a run.** The other engines' plugins keep the person's keyboard, mouse and gamepad
+  out of the game while a run plays; Roblox delivers the person's input and the plugin's virtual input to the game the
+  same way (an InputObject says nothing of where it came from), so it can't. Studio's game view takes your input only
+  while it has focus: work in another window, as the dock reminds you during a run.
 - **Players.** A multiplayer test's players are Studio's own test players (Player1, Player2...), up to 7; the device
   simulator (touch, a console's interface) is for a game of one player.
 - **Client WebSocket capacity.** Roblox forbids HTTP requests from a Play client, including plugins. The editor and
