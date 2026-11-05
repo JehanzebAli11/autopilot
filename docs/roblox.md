@@ -92,6 +92,7 @@ them has been run against Studio yet.
 Every CONFIRMED verification on the place is kept as a regression that `autopilot regress --project
 examples/roblox_testplace` replays without a model (through the connector, so Studio must be open): see
 [regress.md](regress.md).
+The same suite is what `autopilot evolve` measures changes against: see [evolve.md](evolve.md).
 
 ## Known limits
 

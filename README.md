@@ -115,6 +115,12 @@ connector process instead. Its tools are checked against a live Studio; it is st
 Every CONFIRMED verification is kept as a harness that `autopilot regress` replays without a language model, so a
 change that breaks something that used to work shows up. [docs/regress.md](docs/regress.md) explains it.
 
+## Improving Autopilot
+
+`autopilot evolve` tries changes to Autopilot's own prompt, kit reference, controller constants or a game's lib.py,
+measures each one on a locked bench suite, and keeps only those that do better (with `--regressions`, never one that
+breaks a regression). [docs/evolve.md](docs/evolve.md) explains it.
+
 ## Contributing
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up a development environment, run the tests, and add support for a new engine. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).

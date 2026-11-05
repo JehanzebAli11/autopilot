@@ -37,8 +37,10 @@ plugin/unreal/Autopilot/Intermediate/
 .DS_Store
 Thumbs.db
 
-# Bench results, and regressions kept in the repository's root (AUTOPILOT_REGRESSIONS: docs/regress.md)
+# Bench results, autopilot evolve's experiments log (docs/evolve.md), and regressions kept in the repository's root
+# (AUTOPILOT_REGRESSIONS: docs/regress.md)
 bench/results/
+bench/evolve/
 regressions/
 
 # The learning curves of tools/learning_curve.py, and Rojo builds of the example places in the repository's root

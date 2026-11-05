@@ -1174,6 +1174,9 @@ def parser():
     rg.add_argument("--port", type=int, default=8765)
     rg.add_argument("--engine", help="the game's executable (default: the engine adapter's)")
     rg.add_argument("--no-launch", action="store_true", help="don't start the game: wait for the editor's plugin")
+    from . import evolve as evolvemod
+
+    evolvemod.add_parser(sub)
     li = sub.add_parser("login", help="sign in to Aura on its website (for runs with Aura without the Aura app)")
     li.add_argument("--server", help=SERVER_HELP)
     lo = sub.add_parser("logout", help="sign out of Aura (the sign-in `autopilot login` kept)")
@@ -1218,6 +1221,10 @@ def main(argv=None):
     announce_as = aura.BRAIN_FILE if aura.from_app() else bridge.BRAIN_FILE
     # --aura: runs go through Aura whatever the first-run setup says (Aura's own server unless AUTOPILOT_AURA_URL names
     # another); else the setup's choice decides, before every run (autopilot/account.py)
+    if args.cmd == "evolve":  # (no game link of its own: the bench starts each prompt's)
+        from . import evolve
+
+        return evolve.main(args)
     if getattr(args, "aura", False):
         aura.use_default()
     account.fix_at_start()
