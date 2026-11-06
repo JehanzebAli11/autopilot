@@ -67,6 +67,12 @@ def files(tmp_path):
     return tmp_path
 
 
+def lf(text):
+    """text with \n line endings: what render() gives a file written here on Windows has \r\n (Path.write_text), as
+    the file had, and test_windows_line_endings_and_drives checks that; these tests look at what changed."""
+    return text.replace("\r\n", "\n")
+
+
 # -- targets ---------------------------------------------------------------------------------------------------------
 
 def test_prompt_paragraphs(files):
@@ -75,7 +81,7 @@ def test_prompt_paragraphs(files):
     assert parse_target(f"prompt:rules@{files / 'prompts.py'}").current().startswith("Rules:\n- Jev decides")
     assert parse_target(f"prompt:1@{files / 'prompts.py'}").current() == (
         "You write the harness for a game made in {engine}.")
-    new = t.render("Research first: read the codex.")
+    new = lf(t.render("Research first: read the codex."))
     assert "Research first: read the codex.\n\nRules:" in new and "OTHER = 1" in new
     ns = {}
     exec(compile(new, "p", "exec"), ns)
@@ -102,7 +108,7 @@ def test_kit_sections(files):
     assert cur.startswith("## Game (`game`)") and "### Batching" in cur and "## Controllers" not in cur
     assert "# not a heading" in cur  # (a code block's comment isn't a heading)
     assert parse_target(f"kit:batching@{files / 'KIT.md'}").current() == "### Batching\nOne frame per batch.\n\n"
-    new = parse_target(f"kit:Controllers@{files / 'KIT.md'}").render("## Controllers\nwalk_to only.")
+    new = lf(parse_target(f"kit:Controllers@{files / 'KIT.md'}").render("## Controllers\nwalk_to only."))
     assert "## Controllers\nwalk_to only.\n\n## Geometry" in new
     with pytest.raises(TargetError, match="start with its heading"):
         t.render("Reads.")
@@ -125,7 +131,7 @@ def test_constants_and_lib_functions(files):
         parse_target(f"const:MISSING@{files / 'consts.py'}")
     lib = parse_target("lib:arrived", lib=str(files / "lib.py"))
     assert lib.current().startswith("@staticmethod\ndef arrived(") and "other" not in lib.current()
-    new = lib.render("def arrived(distance):\n    return distance < 60")
+    new = lf(lib.render("def arrived(distance):\n    return distance < 60"))
     assert "def arrived(distance):\n    return distance < 60\n\n\ndef other" in new
     with pytest.raises(TargetError, match="named arrived"):
         lib.render("def elsewhere(d):\n    return True")
@@ -138,7 +144,8 @@ def test_constants_and_lib_functions(files):
 
 
 def test_targets_in_the_package_resolve_without_changing_it():
-    before = {p: open(p, encoding="utf-8").read() for p in (evolve.SESSION_FILE, evolve.KIT_FILE)}
+    # (as on disk: a Windows checkout's files have \r\n, which render() keeps)
+    before = {p: open(p, encoding="utf-8", newline="").read() for p in (evolve.SESSION_FILE, evolve.KIT_FILE)}
     rules = parse_target("prompt:Rules")
     assert rules.path == evolve.SESSION_FILE and rules.current().startswith("Rules:")
     new = rules.render(rules.current().replace("Jev decides.", "Jev decides, always."))
@@ -149,7 +156,7 @@ def test_targets_in_the_package_resolve_without_changing_it():
     for bad in ("nothing", "magic:x", "kit:", "const:NOPE"):
         with pytest.raises(TargetError):
             parse_target(bad)
-    assert {p: open(p, encoding="utf-8").read() for p in before} == before
+    assert {p: open(p, encoding="utf-8", newline="").read() for p in before} == before  # (byte for byte)
 
 
 def test_the_measure_is_locked(tmp_path):
@@ -373,8 +380,7 @@ def test_evolve_on_the_tiny_game(tmp_path):
     assert "return distance < 60" in open(f"{mem}/lib.py").read()
     assert open(f"{mem}/tuning.py").read() == "SETTLE_TICKS = 2  # ticks an option waits before it moves\n"
     # each suite run played its prompts at once
-    for spans in run.spans:
-        assert max(s[0] for s in spans) < min(s[1] for s in spans)
+    assert run.together and all(run.together), run.together
 
 
 def test_regressions_gate_the_loop(tmp_path):

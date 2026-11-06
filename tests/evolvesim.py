@@ -240,12 +240,13 @@ def outcome(item, result):
 
 class SimSuite:
     """evolve's run_suite on the tiny game: every prompt at once (threads), each on a world of its own; tokens a
-    fixed 1000 a prompt. spans: (start, end) of each prompt, by run."""
+    fixed 1000 a prompt. together: for each suite run, whether all its prompts were running at the same moment (each
+    waits at its start for the others: a barrier, which times out when they run one after another; no clock is
+    compared, so a coarse one, as Windows' is, can't fool it)."""
 
     def __init__(self, memory, suite=SUITE, max_seconds=3.0):
         self.memory, self.suite, self.max_seconds = memory, suite, max_seconds
-        self.spans = []
-        self.lock = threading.Lock()
+        self.together = []
 
     def __call__(self, out):
         fresh_imports(self.memory)
@@ -257,9 +258,15 @@ class SimSuite:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(HARNESSES[item["harness"]])
             harnesses[item["id"]] = runtime.load_harness(path)
-        spans = []
+        barrier = threading.Barrier(len(self.suite["prompts"]), timeout=10)
+        met = []
 
         def one(item):
+            try:
+                barrier.wait()
+                met.append(True)
+            except threading.BrokenBarrierError:
+                met.append(False)
             t0 = time.monotonic()
             game, world, _ = connect()
             try:
@@ -271,8 +278,6 @@ class SimSuite:
             finally:
                 world.close()
             t1 = time.monotonic()
-            with self.lock:
-                spans.append((t0, t1))
             got = outcome(item, result)
             return {"id": item["id"], "prompt": item["prompt"], "expected": item["expected"], "got": got,
                     "correct": got == item["expected"], "seconds": round(t1 - t0, 3), "tokens": 1000,
@@ -280,5 +285,5 @@ class SimSuite:
 
         with futures.ThreadPoolExecutor(len(self.suite["prompts"])) as pool:
             results = list(pool.map(one, self.suite["prompts"]))
-        self.spans.append(spans)
+        self.together.append(len(met) == len(self.suite["prompts"]) and all(met))
         return results
