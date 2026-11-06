@@ -54,7 +54,7 @@ pythonpath = [".", "tests"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["memory", "data"]
+extend-exclude = ["memory", "data", "regressions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

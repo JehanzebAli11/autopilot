@@ -1,20 +1,20 @@
-"""The engines a game can be made in, each one adapter (see base.Engine): Unreal, Unity, Godot and roblox-mcp. The
-plugin's hello says which (`engine`; a plugin that doesn't say is Unreal's). roblox-mcp has no plugin inside Studio: its
-connector (engines/roblox_connector.py) speaks for Roblox Studio's built-in MCP server.
+"""The engines a game can be made in, each one adapter (see base.Engine): Unreal, Unity, Godot, Roblox (its Studio
+plugin) and roblox-mcp. The plugin's hello says which (`engine`; a plugin that doesn't say is Unreal's). roblox-mcp has
+no plugin inside Studio: its connector (engines/roblox_connector.py) speaks for Roblox Studio's built-in MCP server.
 
-A project two engines could play (a Roblox place, should a Studio plugin's engine be added beside roblox-mcp) goes to
-the engine registered first; AUTOPILOT_ENGINE (an engine's name) chooses one instead, for every project found by its
-path."""
+A project two engines could play (a Roblox place: roblox and roblox-mcp both can) goes to the engine registered first;
+AUTOPILOT_ENGINE (an engine's name) chooses one instead, for every project found by its path."""
 
 import os
 
 from .base import Engine, OpEngine  # noqa: F401
 from .godot import Godot
+from .roblox import Roblox
 from .roblox_connector import RobloxMcp
 from .unity import Unity
 from .unreal import Unreal
 
-ENGINES = {e.name: e for e in (Unreal(), Unity(), Godot(), RobloxMcp())}
+ENGINES = {e.name: e for e in (Unreal(), Unity(), Godot(), Roblox(), RobloxMcp())}
 DEFAULT = "unreal"
 
 
