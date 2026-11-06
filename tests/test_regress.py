@@ -223,8 +223,9 @@ def test_when_and_where_are_not_compared():
     assert "hud_steps: [1]: to:" in regress.same(then, dict(now, hud_steps=[now["hud_steps"][0],
                                                                               dict(now["hud_steps"][1], to=3)]))
     assert "seconds_open" in regress.same(then, dict(now, seconds_open=9.0))  # (a duration is still compared)
-    assert regress.timing("t") and regress.timing("pulled_at_t") and regress.timing("player_at")
-    assert not regress.timing("total") and not regress.timing("attack") and not regress.timing("seconds_open")
+    assert regress.incidental("t") and regress.incidental("pulled_at_t") and regress.incidental("player_at")
+    assert not regress.incidental("total") and not regress.incidental("attack")
+    assert not regress.incidental("seconds_open") and not regress.incidental(3)
 
 
 def test_a_replay_that_fails_once_is_tried_again_and_called_flaky(monkeypatch):

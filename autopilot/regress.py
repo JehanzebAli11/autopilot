@@ -14,7 +14,11 @@ A replay (`autopilot regress`, or replay() here) restarts the level and runs the
 an episode did, but its decisions come from ReplayJev: the recorded picks, in order, where they are offered, else the
 option the recording picked most. No language model and no Jev: the same harness, the same game, deterministic
 choices. It passes when the episode ends in the state it ended in (done) with the same evidence: booleans, strings and
-None equal, numbers within `tolerance` (relative, regression.json; default 0.25). A replay that fails says why.
+None equal, numbers within `tolerance` (relative, regression.json; default 0.25). When and where in the episode
+something happened isn't compared (a key `t` or ending in `_t`, a time; ending in `_at`, a position such as
+`player_at`): a replay's picks land a little earlier or later than the recording's, so it ends a little elsewhere, and
+neither is what was verified. A duration is compared. A replay that fails says why; one that fails is played again
+(retries), and one that passes then is flaky.
 
 Only an episode that started from a restarted level is saved (one that went on from where an earlier episode left
 play needs that state, which a replay can't rebuild): the latest such episode that ended done, else none.
@@ -217,17 +221,16 @@ class ReplayJev:
         return ns(choices=choices, nouls=nouls, scores=scores, usage=None)
 
 
-def timing(key):
-    """Whether an evidence key says when or where something happened (`t`, `pulled_at_t`, `player_at`): those move
-    a little on every replay, so they aren't compared. What happened, how much and how long still are."""
-    key = str(key)
-    return key == "t" or key.endswith("_t") or key.endswith("_at")
+def incidental(key):
+    """Whether an evidence key names when (`t`, `pulled_at_t`) or where (`player_at`) in the episode something
+    happened: details of one run, which a replay's timing moves, so not compared."""
+    return isinstance(key, str) and (key == "t" or key.endswith(("_t", "_at")))
 
 
 def same(expected, got, tolerance=TOLERANCE, ignore=()):
     """Why got differs from expected (a regression's evidence), or None: booleans, strings and None equal; numbers
-    within tolerance (relative, at least of 1); lists and dicts element by element. Keys that say when or where
-    (timing()) and keys in ignore (a regression's own "ignore") aren't compared."""
+    within tolerance (relative, at least of 1); lists and dicts element by element, a dict's incidental keys skipped,
+    and the keys in ignore (a regression's own "ignore")."""
     if isinstance(expected, bool) or expected is None or isinstance(expected, str):
         return None if got == expected else f"{expected!r} then, {got!r} now"
     if isinstance(expected, (int, float)):
@@ -238,7 +241,7 @@ def same(expected, got, tolerance=TOLERANCE, ignore=()):
         if not isinstance(got, dict):
             return f"{expected!r} then, {got!r} now"
         for k, v in expected.items():
-            if timing(k) or k in ignore:
+            if incidental(k) or k in ignore:
                 continue
             if k not in got:
                 return f"{k}: missing now"
