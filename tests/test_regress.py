@@ -123,12 +123,13 @@ def test_evidence_comparison():
     assert regress.same(3, True) is not None
 
 
-def test_evidence_timestamps_are_not_compared():
-    """When in the episode something happened differs from run to run (a replay's picks land a little earlier or
-    later): the lever's pull at 3.44 s, replayed at 4.93 s, is the same pull. What happened is still compared."""
-    recorded = {"gate_open_attr": True, "pulled_at_t": 3.44,
+def test_when_and_where_things_happened_are_not_compared():
+    """When and where in the episode something happened differ from run to run (a replay's picks land a little earlier
+    or later): the lever's pull at 3.44 s, replayed at 4.93 s, with the player a few studs elsewhere, is the same pull.
+    What happened is still compared."""
+    recorded = {"gate_open_attr": True, "pulled_at_t": 3.44, "player_at": [1192.0, 8.0, 122.0],
                 "hud_steps": [{"t": 4.15, "hud_to": 1}, {"t": 11.7, "hud_to": 2}]}
-    replayed = {"gate_open_attr": True, "pulled_at_t": 4.93,
+    replayed = {"gate_open_attr": True, "pulled_at_t": 4.93, "player_at": [1188.0, -0.0, 122.0],
                 "hud_steps": [{"t": 2.85, "hud_to": 1}, {"t": 7.62, "hud_to": 2}]}
     assert regress.same(recorded, replayed) is None
     assert regress.same(recorded, dict(replayed, gate_open_attr=False)) == "gate_open_attr: True then, False now"
@@ -137,8 +138,8 @@ def test_evidence_timestamps_are_not_compared():
     assert regress.same(recorded, {k: v for k, v in replayed.items() if k != "pulled_at_t"}) is None  # (not needed)
     # (a duration is what a claim can be about: still compared)
     assert "crack_to_gone_s" in regress.same({"crack_to_gone_s": 0.4}, {"crack_to_gone_s": 0.7})
-    assert regress.timestamp("t") and regress.timestamp("pulled_at_t")
-    assert not regress.timestamp("door_at") and not regress.timestamp("seconds") and not regress.timestamp("text")
+    assert regress.incidental("t") and regress.incidental("pulled_at_t") and regress.incidental("player_at")
+    assert not any(regress.incidental(k) for k in ("seconds", "text", "attempts", "gate_open_attr", 3))
 
 
 def test_replay_jev_follows_the_recording():
