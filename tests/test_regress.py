@@ -195,3 +195,16 @@ def test_a_project_without_a_headless_game_waits_for_its_plugin(tmp_path, monkey
     monkeypatch.setattr(cli.threading, "Thread", lambda target, daemon: types.SimpleNamespace(
         start=lambda: started.append(target)))
     assert cli.launch_headless(args, "ws://127.0.0.1:9/v1/bridge", say=said.append) is True and len(started) == 1
+
+
+def test_the_replays_hold_the_link_as_a_run_does(tmp_path, monkeypatch):
+    """While regress replays (it drives the game, as a run does), another game's plugin is refused: cmd_regress holds
+    the link as cmd_play does (cli.run_holds, bridge.serve_local's state "run")."""
+    held = []
+    state = {}
+    link = types.SimpleNamespace(hello={"project": "Tiny", "engine": "unreal"}, _state=state)
+    monkeypatch.setattr(cli, "Game", lambda link, codex=None: "game")
+    monkeypatch.setattr(cli.codexmod.Codex, "for_project", staticmethod(lambda project: None))
+    monkeypatch.setattr(cli, "regress_on", lambda game, project, args: held.append(dict(state)) or 0)
+    assert cli.cmd_regress(link, cli.parser().parse_args(["regress", "--no-launch"])) == 0
+    assert held == [{"run": {"project": "Tiny", "engine": "unreal"}}] and state == {}  # (held during, freed after)

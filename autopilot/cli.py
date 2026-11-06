@@ -951,7 +951,8 @@ def cmd_regress(link, args):
     project = codexmod.project_of(link.hello)
     game = Game(link, codexmod.Codex.for_project(project))
     try:
-        return regress_on(game, project, args)
+        with run_holds(link):  # (the replays drive the game: another game's plugin can't take the link over)
+            return regress_on(game, project, args)
     finally:
         if getattr(args, "game_process", None) is not None:
             processes.kill(args.game_process)
