@@ -123,6 +123,24 @@ def test_evidence_comparison():
     assert regress.same(3, True) is not None
 
 
+def test_evidence_timestamps_are_not_compared():
+    """When in the episode something happened differs from run to run (a replay's picks land a little earlier or
+    later): the lever's pull at 3.44 s, replayed at 4.93 s, is the same pull. What happened is still compared."""
+    recorded = {"gate_open_attr": True, "pulled_at_t": 3.44,
+                "hud_steps": [{"t": 4.15, "hud_to": 1}, {"t": 11.7, "hud_to": 2}]}
+    replayed = {"gate_open_attr": True, "pulled_at_t": 4.93,
+                "hud_steps": [{"t": 2.85, "hud_to": 1}, {"t": 7.62, "hud_to": 2}]}
+    assert regress.same(recorded, replayed) is None
+    assert regress.same(recorded, dict(replayed, gate_open_attr=False)) == "gate_open_attr: True then, False now"
+    miscounted = [{"t": 2.85, "hud_to": 1}, {"t": 7.6, "hud_to": 3}]
+    assert "hud_to" in regress.same(recorded, dict(replayed, hud_steps=miscounted))
+    assert regress.same(recorded, {k: v for k, v in replayed.items() if k != "pulled_at_t"}) is None  # (not needed)
+    # (a duration is what a claim can be about: still compared)
+    assert "crack_to_gone_s" in regress.same({"crack_to_gone_s": 0.4}, {"crack_to_gone_s": 0.7})
+    assert regress.timestamp("t") and regress.timestamp("pulled_at_t")
+    assert not regress.timestamp("door_at") and not regress.timestamp("seconds") and not regress.timestamp("text")
+
+
 def test_replay_jev_follows_the_recording():
     from typesafe_sdk import Choice, Noul
 
