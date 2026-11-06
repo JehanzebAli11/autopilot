@@ -1224,6 +1224,9 @@ def parser():
                                         "frame describer (autopilot/connect.py)")
     co.add_argument("client", choices=("claude", "codex"))
     co.add_argument("--remove", action="store_true", help="take out what connect set up")
+    from . import evolve as evolvemod  # (autopilot/evolve.py: its own options)
+
+    evolvemod.add_parser(sub)
     return ap
 
 
@@ -1246,6 +1249,10 @@ def main(argv=None):
 
     load_dotenv(os.path.join(HERE, ".env"))
     load_user_keys()
+    if args.cmd == "evolve":  # (no game link of its own, and not a run: the bench starts each prompt's brain and game)
+        from . import evolve
+
+        return evolve.main(args)
     # An Autopilot the Aura app starts (AUTOPILOT_AURA_URL set for it) says where it listens under Aura's own name,
     # which only plugins set to Use with Aura read; one started with --aura is the user's own Autopilot, found as any
     # other
