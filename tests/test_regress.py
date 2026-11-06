@@ -208,3 +208,46 @@ def test_the_replays_hold_the_link_as_a_run_does(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "regress_on", lambda game, project, args: held.append(dict(state)) or 0)
     assert cli.cmd_regress(link, cli.parser().parse_args(["regress", "--no-launch"])) == 0
     assert held == [{"run": {"project": "Tiny", "engine": "unreal"}}] and state == {}  # (held during, freed after)
+
+
+def test_when_and_where_are_not_compared():
+    """A replay that does what the recording did passes though its times and places moved a little (the agent's
+    harnesses record when a lever was pulled, each HUD step's time, where the player ended): keys `t`, `..._t` and
+    `..._at` aren't compared, nor a regression's own "ignore"; what happened, how much and how long still are."""
+    then = {"opened": True, "pulled_at_t": 3.44, "player_at": [100, 2, 50], "seconds_open": 4.0,
+            "hud_steps": [{"t": 4.15, "from": 0, "to": 1}, {"t": 6.0, "from": 1, "to": 2}], "seed": 7}
+    now = {"opened": True, "pulled_at_t": 4.93, "player_at": [130, 2, 41], "seconds_open": 4.2,
+           "hud_steps": [{"t": 2.85, "from": 0, "to": 1}, {"t": 5.1, "from": 1, "to": 2}], "seed": 9}
+    assert regress.same(then, now, ignore={"seed"}) is None
+    assert "seed" in regress.same(then, now)
+    assert "hud_steps: [1]: to:" in regress.same(then, dict(now, hud_steps=[now["hud_steps"][0],
+                                                                              dict(now["hud_steps"][1], to=3)]))
+    assert "seconds_open" in regress.same(then, dict(now, seconds_open=9.0))  # (a duration is still compared)
+    assert regress.timing("t") and regress.timing("pulled_at_t") and regress.timing("player_at")
+    assert not regress.timing("total") and not regress.timing("attack") and not regress.timing("seconds_open")
+
+
+def test_a_replay_that_fails_once_is_tried_again_and_called_flaky(monkeypatch):
+    """A failed replay is played again (no model: it costs only time); one that passes then is FLAKY, counted
+    passed and listed apart; one that fails every time fails. --retries 0 doesn't retry."""
+    outcomes = {"a": [False, True], "b": [False, False], "c": [True]}
+    played = []
+
+    def replay(game, reg, **kw):
+        played.append(reg)
+        ok = outcomes[reg].pop(0) if len(outcomes[reg]) > 1 else outcomes[reg][0]
+        return {"id": reg, "prompt": reg, "passed": ok, "why": "as recorded" if ok else f"{reg} broke",
+                "seconds": 1.0}
+
+    monkeypatch.setattr(regress, "replay", replay)
+    said = []
+    results = regress.replay_all(None, ["a", "b", "c"], say=said.append)
+    assert played == ["a", "a", "b", "b", "c"]
+    s = regress.summary(results)
+    assert s["passed"] == 2 and s["failed"] == ["b"] and s["flaky"] == ["a"]
+    assert results[0]["why"] == "passed on try 2; the first: a broke" and said[0].startswith("  FLAKY a")
+    played.clear()
+    outcomes["a"] = [False, True]
+    regress.replay_all(None, ["a"], say=None, retries=0)
+    assert played == ["a"]
+    assert cli.parser().parse_args(["regress", "--retries", "2"]).retries == 2

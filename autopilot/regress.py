@@ -31,6 +31,7 @@ from . import runtime
 
 FILE = "regression.json"
 TOLERANCE = 0.25
+RETRIES = 1  # times a failed replay is played again before it counts as failed (a pass then: flaky)
 LOOKAHEAD = 5  # recorded picks a replay may skip to find one offered now (timings differ between runs)
 MIN_SECONDS = 20.0  # a replay's episode lasts at least this, and 1.5x the recorded one
 
@@ -216,9 +217,17 @@ class ReplayJev:
         return ns(choices=choices, nouls=nouls, scores=scores, usage=None)
 
 
-def same(expected, got, tolerance=TOLERANCE):
+def timing(key):
+    """Whether an evidence key says when or where something happened (`t`, `pulled_at_t`, `player_at`): those move
+    a little on every replay, so they aren't compared. What happened, how much and how long still are."""
+    key = str(key)
+    return key == "t" or key.endswith("_t") or key.endswith("_at")
+
+
+def same(expected, got, tolerance=TOLERANCE, ignore=()):
     """Why got differs from expected (a regression's evidence), or None: booleans, strings and None equal; numbers
-    within tolerance (relative, at least of 1); lists and dicts element by element."""
+    within tolerance (relative, at least of 1); lists and dicts element by element. Keys that say when or where
+    (timing()) and keys in ignore (a regression's own "ignore") aren't compared."""
     if isinstance(expected, bool) or expected is None or isinstance(expected, str):
         return None if got == expected else f"{expected!r} then, {got!r} now"
     if isinstance(expected, (int, float)):
@@ -229,9 +238,11 @@ def same(expected, got, tolerance=TOLERANCE):
         if not isinstance(got, dict):
             return f"{expected!r} then, {got!r} now"
         for k, v in expected.items():
+            if timing(k) or k in ignore:
+                continue
             if k not in got:
                 return f"{k}: missing now"
-            why = same(v, got[k], tolerance)
+            why = same(v, got[k], tolerance, ignore)
             if why:
                 return f"{k}: {why}"
         return None
@@ -239,7 +250,7 @@ def same(expected, got, tolerance=TOLERANCE):
         if not isinstance(got, list) or len(got) != len(expected):
             return f"{expected!r} then, {got!r} now"
         for i, (a, b) in enumerate(zip(expected, got)):
-            why = same(a, b, tolerance)
+            why = same(a, b, tolerance, ignore)
             if why:
                 return f"[{i}]: {why}"
     return None
@@ -302,7 +313,8 @@ def replay(game, reg, project_root=None, frozen_lib=False, seconds=None, restart
         out["why"] = (f"ended {status.get('state') or 'without a status'} ({result.get('reason') or ''}"
                       f"{': ' + status['note'] if status.get('note') else ''}), not {expect.get('state')}")
         return out
-    why = same(expect.get("evidence") or {}, status.get("evidence") or {}, float(spec.get("tolerance", TOLERANCE)))
+    why = same(expect.get("evidence") or {}, status.get("evidence") or {}, float(spec.get("tolerance", TOLERANCE)),
+               set(spec.get("ignore") or ()))
     if why:
         out["why"] = f"evidence differs: {why}"
         return out
@@ -311,18 +323,28 @@ def replay(game, reg, project_root=None, frozen_lib=False, seconds=None, restart
     return out
 
 
-def replay_all(game, regs, project_root=None, frozen_lib=False, seconds=None, say=print):
-    """replay() of each regression folder in regs, one after another (one game): their results."""
+def replay_all(game, regs, project_root=None, frozen_lib=False, seconds=None, say=print, retries=RETRIES):
+    """replay() of each regression folder in regs, one after another (one game): their results. One that fails is
+    replayed again, up to `retries` times (a replay costs no model): one that then passes is FLAKY (its "flaky": it
+    passed, but not every time: its harness reads the game too tightly, or the game itself varies)."""
     results = []
     for reg in regs:
         r = replay(game, reg, project_root=project_root, frozen_lib=frozen_lib, seconds=seconds)
+        first = r
+        for k in range(max(0, retries)):
+            if r["passed"]:
+                break
+            r = replay(game, reg, project_root=project_root, frozen_lib=frozen_lib, seconds=seconds)
+            if r["passed"]:
+                r = dict(r, flaky=True, why=f"passed on try {k + 2}; the first: {first['why']}")
         results.append(r)
         if say:
-            say(f"  {'ok  ' if r['passed'] else 'FAIL'} {r['id']}: {r['prompt'] or ''}  ({r['why']}, "
-                f"{r['seconds']:.0f}s)")
+            mark = "FLAKY" if r.get("flaky") else "ok   " if r["passed"] else "FAIL "
+            say(f"  {mark} {r['id']}: {r['prompt'] or ''}  ({r['why']}, {r['seconds']:.0f}s)")
     return results
 
 
 def summary(results):
     return {"passed": sum(1 for r in results if r["passed"]), "total": len(results),
-            "failed": sorted(r["id"] for r in results if not r["passed"]), "results": results}
+            "failed": sorted(r["id"] for r in results if not r["passed"]),
+            "flaky": sorted(r["id"] for r in results if r.get("flaky")), "results": results}

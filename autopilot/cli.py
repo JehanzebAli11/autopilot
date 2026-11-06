@@ -938,9 +938,11 @@ def regress_on(game, project, args, say=print):
     else:
         say(f"Replaying {len(regs)} regression(s) from {base}, without a model")
         results = regress.replay_all(game, regs, project_root=root, frozen_lib=getattr(args, "frozen_lib", False),
-                                     seconds=getattr(args, "seconds", None), say=say)
+                                     seconds=getattr(args, "seconds", None), say=say,
+                                     retries=getattr(args, "retries", regress.RETRIES))
         summary = regress.summary(results)
-        say(f"{summary['passed']}/{summary['total']} passed")
+        say(f"{summary['passed']}/{summary['total']} passed"
+            + (f" ({len(summary['flaky'])} flaky: passed only on a retry)" if summary["flaky"] else ""))
     if getattr(args, "json", None):
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=1)
@@ -1201,6 +1203,9 @@ def parser():
     rg.add_argument("--frozen-lib", action="store_true",
                     help="use each regression's own lib.py snapshot, not the project's lib.py now")
     rg.add_argument("--json", help="write the results there")
+    rg.add_argument("--retries", type=int, default=1,
+                    help="replay a failed regression again this many times; one that then passes is reported flaky "
+                         "(default 1; 0: no retries)")
     rg.add_argument("--port", type=int, default=8765)
     rg.add_argument("--engine", help="the game's executable (default: the engine adapter's)")
     rg.add_argument("--no-launch", action="store_true", help="don't start the game: wait for the editor's plugin")
