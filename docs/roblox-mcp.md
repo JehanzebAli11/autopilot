@@ -85,7 +85,7 @@ prints the `tick_hz` and `tempo` a harness can keep at that speed. The agent's k
 ## The bench
 
 ```bash
-python bench/run_autopilot.py --project examples/roblox_testplace --suite bench/suites/roblox_testplace.json
+AUTOPILOT_ENGINE=roblox-mcp python bench/run_autopilot.py --project examples/roblox_testplace --suite bench/suites/roblox_testplace.json
 ```
 
 For a Roblox project the bench starts the connector instead of a headless game, so Studio must be open on the built

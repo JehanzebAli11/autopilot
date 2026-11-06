@@ -25,7 +25,7 @@ Open `TestPlace.rbxlx` in Roblox Studio and turn on Studio's MCP server (see [do
 ## Run the bench suite
 
 ```bash
-python bench/run_autopilot.py --project examples/roblox_testplace --suite bench/suites/roblox_testplace.json
+AUTOPILOT_ENGINE=roblox-mcp python bench/run_autopilot.py --project examples/roblox_testplace --suite bench/suites/roblox_testplace.json
 ```
 
 The suite's prompts have not been run against a live Studio yet: their expected verdicts are what the place's code

@@ -62,16 +62,16 @@ def test_projects_rojo_and_place_files(tmp_path):
     (rojo / "src" / "server").mkdir(parents=True)
     (rojo / "default.project.json").write_text(json.dumps({"name": "Obby Rush", "tree": {"$className": "DataModel"}}))
     for p in (rojo, rojo / "default.project.json"):
-        eng, path = engines.find_project(str(p))
+        eng, path = engines.find_project(str(p), "roblox-mcp")
         assert eng.name == "roblox-mcp" and os.path.samefile(path, rojo), p
     assert engines.get("roblox-mcp").project_name(str(rojo)) == "Obby Rush"
     places = tmp_path / "Places"
     places.mkdir()
     (places / "Other.rbxl").write_bytes(b"<roblox!")
     (places / "Places.rbxlx").write_text("<roblox>")
-    eng, path = engines.find_project(str(places))
+    eng, path = engines.find_project(str(places), "roblox-mcp")
     assert eng.name == "roblox-mcp" and path.endswith("Places.rbxlx")  # (the one named after the folder)
-    eng, path = engines.find_project(str(places / "Other.rbxl"))
+    eng, path = engines.find_project(str(places / "Other.rbxl"), "roblox-mcp")
     assert eng.name == "roblox-mcp" and path.endswith("Other.rbxl")
     assert engines.get("roblox-mcp").project_name(path) == "Other"
     assert engines.find_project(str(tmp_path / "Obby" / "src")) == (None, None)
@@ -83,7 +83,7 @@ def test_projects_rojo_and_place_files(tmp_path):
 
 
 def test_the_test_place_is_a_roblox_project():
-    eng, path = engines.find_project(TESTPLACE)
+    eng, path = engines.find_project(TESTPLACE, "roblox-mcp")
     assert eng.name == "roblox-mcp" and eng.project_name(path) == "Autopilot Test Place"
 
 
@@ -108,6 +108,7 @@ def test_local_codex_of_a_rojo_project(tmp_path, monkeypatch):
     from autopilot import codex
 
     monkeypatch.setattr(codex, "MEMORY", str(tmp_path / "mem"))
+    monkeypatch.setenv("AUTOPILOT_ENGINE", "roblox-mcp")
     cx = codex.build("TestPlace", path=TESTPLACE)
     have = sorted(os.path.relpath(os.path.join(b, f), cx.root).replace(os.sep, "/")
                   for b, _, fs in os.walk(cx.root) for f in fs)
@@ -675,18 +676,12 @@ def test_the_luau_prelude_ships_with_the_package():
     assert os.path.isfile(roblox.PRELUDE_FILE)
 
 
-def test_roblox_mcp_beside_a_studio_plugin_engine(monkeypatch, tmp_path):
-    """Should an engine for a Studio plugin be registered first (it claims Roblox places too), a place goes to it, and
+def test_roblox_mcp_beside_the_studio_plugin_engine(monkeypatch, tmp_path):
+    """The Studio plugin's engine is registered first and claims Roblox places too, so a place goes to it, and
     AUTOPILOT_ENGINE=roblox-mcp chooses the connector; a plugin's hello says which engine it is either way."""
     rojo = tmp_path / "Obby"
     rojo.mkdir()
     (rojo / "default.project.json").write_text(json.dumps({"name": "Obby", "tree": {"$className": "DataModel"}}))
-    assert engines.find_project(str(rojo))[0].name == "roblox-mcp"  # (the only engine that plays it)
-
-    class StudioPlugin(roblox.RobloxMcp):
-        name = "roblox"
-
-    monkeypatch.setattr(engines, "ENGINES", {"roblox": StudioPlugin(), **engines.ENGINES})
     assert engines.find_project(str(rojo))[0].name == "roblox"
     monkeypatch.setenv("AUTOPILOT_ENGINE", "roblox-mcp")
     eng, path = engines.find_project(str(rojo))
