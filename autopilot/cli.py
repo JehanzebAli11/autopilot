@@ -852,7 +852,7 @@ def answer_again(link, hello, done):
 def cmd_codex(args):
     eng, path = engines.find_project(args.path)
     if not eng:
-        print(f"No Unreal, Unity or Godot project at {args.path}")
+        print(f"No Unreal, Unity, Godot or Roblox Studio project at {args.path}")
         return 1
     project = args.name or eng.project_name(path)
     remember_project(project, path, eng)
@@ -1160,15 +1160,19 @@ def cmd_serve(link, args):
             time.sleep(1.0)
 
 
+HTTP_HELP = ("where plugins that can't keep a WebSocket open talk over HTTP (Roblox Studio's, when its DataModels' "
+             "few sockets are taken): default the next port after --port (any free port with --port 0)")
 SERVER_HELP = f"the Aura server (default: AUTOPILOT_AURA_URL, else AUTOPILOT_AURA_SERVER, else {aura.DEFAULT_URL})"
 
 
 def parser():
-    ap = argparse.ArgumentParser(prog="autopilot", description="Automated playtesting for Unreal, Unity and Godot.")
+    ap = argparse.ArgumentParser(prog="autopilot",
+                                 description="Automated playtesting for Unreal, Unity, Godot and Roblox.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     project_help = "the game's project on this machine: a .uproject, a Unity project folder or a project.godot"
     s = sub.add_parser("serve", help="run what the editor's Autopilot tab starts")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--http-port", type=int, help=HTTP_HELP)
     s.add_argument("--project", dest="path", help=project_help)
     s.add_argument("--model", help="the language model (default: AUTOPILOT_MODEL)")
     s.add_argument("--aura", action="store_true",
@@ -1178,6 +1182,7 @@ def parser():
     p = sub.add_parser("play", help="run one prompt and exit with its result")
     p.add_argument("prompt")
     p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--http-port", type=int, help=HTTP_HELP)
     p.add_argument("--project", dest="path", help=project_help)
     p.add_argument("--model", help="the language model (default: AUTOPILOT_MODEL)")
     p.add_argument("--level", help="the level to play: a path or a name (default: the one the prompt means, as the "
@@ -1284,8 +1289,11 @@ def main(argv=None):
     if args.cmd == "regress" and args.path and not args.no_launch:
         launch_headless(args, f"ws://127.0.0.1:{args.port}/v1/bridge")
     print(f"Waiting for the plugin on ws://127.0.0.1:{args.port}/v1/bridge ...")
+    http_port = getattr(args, "http_port", None)
+    if http_port is None:
+        http_port = args.port + 1 if args.port else 0
     link = bridge.serve_local(port=args.port, role="service" if args.cmd == "serve" else "cli", announce_as=announce_as,
-                              extra=extra)
+                              extra=extra, http_port=http_port)
     print(f"Connected: {link.hello.get('project')} ({link.hello.get('host')}, {engines.for_hello(link.hello).title})")
     link = LiveLink(link)
     return {"play": cmd_play, "run": cmd_run, "serve": cmd_serve, "regress": cmd_regress}[args.cmd](link, args)
