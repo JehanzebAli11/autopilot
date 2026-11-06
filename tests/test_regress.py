@@ -123,25 +123,6 @@ def test_evidence_comparison():
     assert regress.same(3, True) is not None
 
 
-def test_when_and_where_things_happened_are_not_compared():
-    """When and where in the episode something happened differ from run to run (a replay's picks land a little earlier
-    or later): the lever's pull at 3.44 s, replayed at 4.93 s, with the player a few studs elsewhere, is the same pull.
-    What happened is still compared."""
-    recorded = {"gate_open_attr": True, "pulled_at_t": 3.44, "player_at": [1192.0, 8.0, 122.0],
-                "hud_steps": [{"t": 4.15, "hud_to": 1}, {"t": 11.7, "hud_to": 2}]}
-    replayed = {"gate_open_attr": True, "pulled_at_t": 4.93, "player_at": [1188.0, -0.0, 122.0],
-                "hud_steps": [{"t": 2.85, "hud_to": 1}, {"t": 7.62, "hud_to": 2}]}
-    assert regress.same(recorded, replayed) is None
-    assert regress.same(recorded, dict(replayed, gate_open_attr=False)) == "gate_open_attr: True then, False now"
-    miscounted = [{"t": 2.85, "hud_to": 1}, {"t": 7.6, "hud_to": 3}]
-    assert "hud_to" in regress.same(recorded, dict(replayed, hud_steps=miscounted))
-    assert regress.same(recorded, {k: v for k, v in replayed.items() if k != "pulled_at_t"}) is None  # (not needed)
-    # (a duration is what a claim can be about: still compared)
-    assert "crack_to_gone_s" in regress.same({"crack_to_gone_s": 0.4}, {"crack_to_gone_s": 0.7})
-    assert regress.incidental("t") and regress.incidental("pulled_at_t") and regress.incidental("player_at")
-    assert not any(regress.incidental(k) for k in ("seconds", "text", "attempts", "gate_open_attr", 3))
-
-
 def test_replay_jev_follows_the_recording():
     from typesafe_sdk import Choice, Noul
 
@@ -214,3 +195,66 @@ def test_a_project_without_a_headless_game_waits_for_its_plugin(tmp_path, monkey
     monkeypatch.setattr(cli.threading, "Thread", lambda target, daemon: types.SimpleNamespace(
         start=lambda: started.append(target)))
     assert cli.launch_headless(args, "ws://127.0.0.1:9/v1/bridge", say=said.append) is True and len(started) == 1
+
+
+def test_when_and_where_are_not_compared():
+    """A replay that does what the recording did passes though its times and places moved a little (the agent's
+    harnesses record when a lever was pulled, each HUD step's time, where the player ended): keys `t`, `..._t` and
+    `..._at` aren't compared, nor a regression's own "ignore"; what happened, how much and how long still are."""
+    then = {"opened": True, "pulled_at_t": 3.44, "player_at": [100, 2, 50], "seconds_open": 4.0,
+            "hud_steps": [{"t": 4.15, "from": 0, "to": 1}, {"t": 6.0, "from": 1, "to": 2}], "seed": 7}
+    now = {"opened": True, "pulled_at_t": 4.93, "player_at": [130, 2, 41], "seconds_open": 4.2,
+           "hud_steps": [{"t": 2.85, "from": 0, "to": 1}, {"t": 5.1, "from": 1, "to": 2}], "seed": 9}
+    assert regress.same(then, now, ignore={"seed"}) is None
+    assert "seed" in regress.same(then, now)
+    assert "hud_steps: [1]: to:" in regress.same(then, dict(now, hud_steps=[now["hud_steps"][0],
+                                                                              dict(now["hud_steps"][1], to=3)]))
+    assert "seconds_open" in regress.same(then, dict(now, seconds_open=9.0))  # (a duration is still compared)
+    assert regress.incidental("t") and regress.incidental("pulled_at_t") and regress.incidental("player_at")
+    assert not regress.incidental("total") and not regress.incidental("attack")
+    assert not regress.incidental("seconds_open") and not regress.incidental(3)
+
+
+def test_a_replay_that_fails_once_is_tried_again_and_called_flaky(monkeypatch):
+    """A failed replay is played again (no model: it costs only time); one that passes then is FLAKY, counted
+    passed and listed apart; one that fails every time fails. --retries 0 doesn't retry."""
+    outcomes = {"a": [False, True], "b": [False, False], "c": [True]}
+    played = []
+
+    def replay(game, reg, **kw):
+        played.append(reg)
+        ok = outcomes[reg].pop(0) if len(outcomes[reg]) > 1 else outcomes[reg][0]
+        return {"id": reg, "prompt": reg, "passed": ok, "why": "as recorded" if ok else f"{reg} broke",
+                "seconds": 1.0}
+
+    monkeypatch.setattr(regress, "replay", replay)
+    said = []
+    results = regress.replay_all(None, ["a", "b", "c"], say=said.append)
+    assert played == ["a", "a", "b", "b", "c"]
+    s = regress.summary(results)
+    assert s["passed"] == 2 and s["failed"] == ["b"] and s["flaky"] == ["a"]
+    assert results[0]["why"] == "passed on try 2; the first: a broke" and said[0].startswith("  FLAKY a")
+    played.clear()
+    outcomes["a"] = [False, True]
+    regress.replay_all(None, ["a"], say=None, retries=0)
+    assert played == ["a"]
+    assert cli.parser().parse_args(["regress", "--retries", "2"]).retries == 2
+
+
+def test_when_and_where_things_happened_are_not_compared():
+    """When and where in the episode something happened differ from run to run (a replay's picks land a little earlier
+    or later): the lever's pull at 3.44 s, replayed at 4.93 s, with the player a few studs elsewhere, is the same pull.
+    What happened is still compared."""
+    recorded = {"gate_open_attr": True, "pulled_at_t": 3.44, "player_at": [1192.0, 8.0, 122.0],
+                "hud_steps": [{"t": 4.15, "hud_to": 1}, {"t": 11.7, "hud_to": 2}]}
+    replayed = {"gate_open_attr": True, "pulled_at_t": 4.93, "player_at": [1188.0, -0.0, 122.0],
+                "hud_steps": [{"t": 2.85, "hud_to": 1}, {"t": 7.62, "hud_to": 2}]}
+    assert regress.same(recorded, replayed) is None
+    assert regress.same(recorded, dict(replayed, gate_open_attr=False)) == "gate_open_attr: True then, False now"
+    miscounted = [{"t": 2.85, "hud_to": 1}, {"t": 7.6, "hud_to": 3}]
+    assert "hud_to" in regress.same(recorded, dict(replayed, hud_steps=miscounted))
+    assert regress.same(recorded, {k: v for k, v in replayed.items() if k != "pulled_at_t"}) is None  # (not needed)
+    # (a duration is what a claim can be about: still compared)
+    assert "crack_to_gone_s" in regress.same({"crack_to_gone_s": 0.4}, {"crack_to_gone_s": 0.7})
+    assert regress.incidental("t") and regress.incidental("pulled_at_t") and regress.incidental("player_at")
+    assert not any(regress.incidental(k) for k in ("seconds", "text", "attempts", "gate_open_attr", 3))
