@@ -172,6 +172,10 @@ def test_movement_from_the_humanoid():
 def test_a_batched_observe_is_one_execute_luau(playing):
     game, link, backend, place = playing
     coin = game.actors("tag:Coin")[0]
+    # (reads that come in together wait COALESCE_SECONDS for one another: live, a few ms is enough, and one that comes
+    # later only costs another round trip. On a loaded test machine a thread can start later than that, so the window
+    # is widened here: this checks that reads asked together go as one call, not how fast threads start)
+    backend.reads.window = 0.25
     place.calls.clear()
     pose, coin_at, coins, doors, gone = game.batch([
         lambda: game.pose(), lambda: game.loc(coin), lambda: game.get("Players/Hero/leaderstats", "Coins"),
@@ -567,6 +571,7 @@ def test_the_connector_plays_over_the_bridge(place):
 
     studio = mcp.Studio.connect(mcp.LocalTransport(place.server()))
     backend = roblox.StudioBackend(studio)
+    backend.reads.window = 0.25  # (see test_a_batched_observe_is_one_execute_luau: not how fast threads start)
     port_box = {}
     import socket
 
