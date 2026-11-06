@@ -320,6 +320,28 @@ class LLMProxy:
         headers["Accept-Encoding"] = "identity"
         sse, raw = SSE(), []
         status, answered = 502, False
+        counted = {}
+
+        def count():
+            # The call's usage, counted once: before the answer's last chunk goes to the caller, so whoever reads the
+            # usage after the call returns finds it (the caller's next read can come before this thread goes on)
+            if counted:
+                return counted["response"], counted["model"], counted["usage"]
+            response = sse.result() if sse.events else None
+            if response is None and raw:
+                try:
+                    response = json.loads(b"".join(raw))
+                except ValueError:
+                    response = {"_text": b"".join(raw).decode("utf-8", "replace")[:20000]}
+            model, usage = llm_usage(response)
+            if not model and isinstance(request, dict):
+                model = request.get("model")
+            if usage and record["path"].rstrip("/").endswith(("/messages", "/chat/completions", "/responses",
+                                                              "generateContent", "streamGenerateContent")):
+                self.usage.add("llm", model, **usage)
+            counted.update(response=response, model=model, usage=usage)
+            return response, model, usage
+
         try:
             r = self.http.request(h.command, f"{upstream}/{rest}", headers=headers, data=body or None, stream=True,
                                   timeout=UPSTREAM_TIMEOUT)
@@ -343,6 +365,7 @@ class LLMProxy:
                         raw.append(chunk)
                     h.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                     h.wfile.flush()
+                count()
                 h.wfile.write(b"0\r\n\r\n")
                 h.wfile.flush()
             finally:
@@ -357,18 +380,7 @@ class LLMProxy:
             else:
                 self._reply_error(h, 502, record["error"])
         ended = time.time()
-        response = sse.result() if sse.events else None
-        if response is None and raw:
-            try:
-                response = json.loads(b"".join(raw))
-            except ValueError:
-                response = {"_text": b"".join(raw).decode("utf-8", "replace")[:20000]}
-        model, usage = llm_usage(response)
-        if not model and isinstance(request, dict):
-            model = request.get("model")
-        if usage and record["path"].rstrip("/").endswith(("/messages", "/chat/completions", "/responses",
-                                                          "generateContent", "streamGenerateContent")):
-            self.usage.add("llm", model, **usage)
+        response, model, usage = count()  # (counted already unless the answer was cut short)
         record.update(status=status, ended=round(ended, 3), latency_s=round(ended - started, 3),
                       ttft_s=round(first_byte - started, 3) if first_byte else None, model=model, usage=usage,
                       response=response, stream=bool(sse.events))
