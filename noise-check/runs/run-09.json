@@ -1,0 +1,139 @@
+{
+ "project": "examples/roblox_testplace",
+ "score": 6,
+ "total": 6,
+ "results": [
+  {
+   "id": "A",
+   "prompt": "Verify that pulling the lever opens the door",
+   "expected": "CONFIRMED",
+   "got": "CONFIRMED",
+   "correct": true,
+   "summary": "Pulling the lever opens the door. In episode 1 the agent walked to Workspace/Lever, going round the obby's lava, and held E at its \"Pull\" ProximityPrompt. The lever's Pulled went from false to true. The door's Open went to true, CanCollide to false and Transparency to 0.8. The agent then walked through the doorway to the far side. A second pull reversed it: Pulled became false, Open false, CanCollide true, and the door faded back toward opaque. Jev made 22 decisions among 2-3 options; all four plan steps were done by t=22.4 s. No errors were logged during the episode.",
+   "evidence": [
+    "trace1.jsonl, t=1.35: lever Pulled=false, door Open=false, CanCollide=true, Transparency=0.0 (the level as it starts)",
+    "trace1.jsonl, t=0.6-12.7: pull_lever walked about 24 m around the lava along kit y=-650, held E 0.9 s; open_door step done at t=12.7",
+    "trace1.jsonl, t=13.95-15.05: Pulled=true, door Open=true, CanCollide=false, Transparency tweened 0.45 -> 0.78 -> 0.8",
+    "trace1.jsonl, t=13.2-16.4: walk_through_door crossed the door plane (kit x 2462 -> 2855; door plane 2688) while the door was open; pass_door done at t=16.4"
+   ],
+   "seconds": 289,
+   "implementer_seconds": 277.2,
+   "episodes": 1,
+   "cost_usd": 1.4749344000000002,
+   "tokens": null,
+   "turns": 29,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/A"
+  },
+  {
+   "id": "B",
+   "prompt": "Collect the coin",
+   "expected": "achieved",
+   "got": "achieved",
+   "correct": true,
+   "summary": "The agent collected the coin in episode 1. Jev was offered walk_to_coin and jump_onto_coin. It picked walk_to_coin (p=0.86) and kept that choice in 4 more decisions while it ran. The character walked about 4.8 m onto the coin. The server then raised leaderstats Coins from 0 to 1 and destroyed Workspace/Coin, at t=3.2 s. In this episode the player spawned on the ground. In the probe session before it, the player had spawned on a high 'Worldsmith' platform about 100 studs up. The harness also has a plan step for that case: walk off the platform's edge toward the coin. A probe showed that step lands safely and that the coin is then collected.",
+   "evidence": [
+    "runs/20261110-154326/trace1.jsonl: plan get_down done at t=0.1 s (the player was already on the ground, height 84 cm), collect done at t=3.2 s; status done, evidence {coins: 1, coin_present: false}",
+    "Episode 1: Jev made 5 decisions between walk_to_coin and jump_onto_coin. walk_to_coin started at t=0.7 s (p=0.86) and worked in 2.47 s. Its executor ended when the server destroyed the coin on touch.",
+    "The coin's distance went from 482 cm at t=0.2 s to 68 cm at t=2.8 s, and then Coins = 1.",
+    "Game error log: no errors logged during episode 1."
+   ],
+   "seconds": 110,
+   "implementer_seconds": 99.8,
+   "episodes": 1,
+   "cost_usd": 0.9823817999999996,
+   "tokens": null,
+   "turns": 21,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/B"
+  },
+  {
+   "id": "C",
+   "prompt": "Verify that picking up the coin adds 2 to the player's coin count",
+   "expected": "DENIED",
+   "got": "DENIED",
+   "correct": true,
+   "summary": "The agent walked into the place's only coin (Workspace/Coin, tagged Coin). The server destroyed the coin and leaderstats.Coins went from 0 to 1. The HUD changed from \"Coins: 0\" to \"Coins: 1\". So one coin adds 1, not 2. This matches the code: Game.server.luau adds the coin's \"Value\" attribute, which Build.server.luau sets from Config.Coin.value = 1.",
+   "evidence": [
+    "Episode 1 (runs/20261110-154515/trace1.jsonl): Jev chose pick_up_coin at t=0.4 and the agent reached the coin at about t=3.2. The coin was then gone (game.exists false).",
+    "Episode 1 status evidence: coins_before=0, coins_after=1, delta=+1, hud_after='Coins: 1', coin_Value_attribute=1 (server), coin_destroyed=true. Read again at t=5.8 and t=6.5, it was still 1 (no delayed second increment).",
+    "Jev made 11 decisions among 2-3 options (pick_up_coin, watch_hud, walk_back_to_start).",
+    "Probe before the episode: Workspace/Coin attribute Value=1 on client and server; Coins=0 at start."
+   ],
+   "seconds": 68,
+   "implementer_seconds": 57.2,
+   "episodes": 1,
+   "cost_usd": 0.8332598,
+   "tokens": null,
+   "turns": 10,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/C"
+  },
+  {
+   "id": "D",
+   "prompt": "Reach the final checkpoint of the obby",
+   "expected": "achieved",
+   "got": "achieved",
+   "correct": true,
+   "summary": "In episode 2, the agent reached the obby's final checkpoint (leaderstats Stage = 3, Config.FinalStage = 3) at t=12.1 s, entirely through keyboard and mouse input. It started on the Worldsmith sky platform about 100 studs up. It run-jumped off the edge toward the obby, clearing the kill floor below, and landed on checkpoint 1 (t=5.1 s). It then jumped up to checkpoint 2 (t=8.3 s) and run-jumped over the lava to checkpoint 3. Jev made 13 decisions, choosing among 2 options at each step: leap off vs walk off the edge, and jump to the next checkpoint vs step back for a run-up. Episode 1 stalled because of a harness bug, not the game: Checkpoint@N paths change order between restarts, so the harness confused the checkpoints. The fix was to map checkpoints by their Stage attribute.",
+   "evidence": [
+    "Episode 2 (runs/20261110-154624/trace2.jsonl): plan cp1 done t=5.1s, cp2 done t=8.3s, cp3 done t=12.1s; status done: evidence {stage: 3, standing_on: 'checkpoint 3'}",
+    "Timeline: leap_off_toward_obby (p=0.97) worked; jump_to_checkpoint_2 (p=0.93) -> 'stage now 2'; jump_to_checkpoint_3 (p=0.73) running when Stage became 3",
+    "The game's error log: no errors logged during episode 2",
+    "Probe research before the episodes, all done through inputs: the run-jump off the sky platform landed on checkpoint 1; kit jump_to to stage 2 worked; jump_to to stage 3 failed because it backed off the platform for a run-up; a custom run-jump reached Stage 3. Direct changes in probes: none (only luau reads listing the Worldsmith scripts and FallenPartsDestroyHeight). Direct changes in episodes: none."
+   ],
+   "seconds": 313,
+   "implementer_seconds": 301.8,
+   "episodes": 2,
+   "cost_usd": 1.3047958,
+   "tokens": null,
+   "turns": 25,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/D"
+  },
+  {
+   "id": "E",
+   "prompt": "Verify that touching the lava sends the player back to their last checkpoint",
+   "expected": "CONFIRMED",
+   "got": "CONFIRMED",
+   "correct": true,
+   "summary": "In episode 1 the agent climbed the obby by jumping onto two checkpoints, which raised leaderstats.Stage to 2. It then walked off checkpoint 2 into the lava strip. Touching the lava killed it straight away (health 0). About 6.6 s later it respawned on top of checkpoint 2, its last checkpoint, and Stage stayed at 2. Jev made 15 decisions, choosing among 2-3 options at each step. A probe before the episode gave the same result: the agent died in the lava at Stage 2 and respawned on checkpoint 2.",
+   "evidence": [
+    "Episode 1 (runs/20261110-155136/trace1.jsonl): jump_to_next_checkpoint landed on it at t=0.4-7.1 s (Stage 0->1) and at t=7.1-11.3 s (Stage 1->2). Jev picked it over collect_coin and step_into_lava.",
+    "t=11.6 s: Jev picked step_into_lava (p=0.71) over jump_to_next_checkpoint. The agent died at kit (1349,0,140), 5 cm from the lava's center, with health 0, at t\u224819.8 s and Stage 2.",
+    "Respawn at t=26.4 s (6.6 s after death): root at kit (1120,0,266), which is over the center of checkpoint 2 at (1120,0,112) (top z=140), the expected spot. on_last_checkpoint=true, stage_after=2.",
+    "Probe before the harness (research): the same chain. Death in the lava at Stage 2, then the agent appeared at (1120,0,266) with health 100 about 5.6 s later."
+   ],
+   "seconds": 220,
+   "implementer_seconds": 210.5,
+   "episodes": 1,
+   "cost_usd": 1.3481905999999997,
+   "tokens": null,
+   "turns": 23,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/E"
+  },
+  {
+   "id": "F",
+   "prompt": "Verify that the door can be walked through while it is shut",
+   "expected": "DENIED",
+   "got": "DENIED",
+   "correct": true,
+   "summary": "The shut door can't be walked through. In episode 2, Jev chose 6 attempts. It walked into the door at the centre, the left edge and the right edge, and ran into the centre while jumping 3 times. During every attempt the server showed the door shut (Open=false, CanCollide=true). In each plain walk, holding W stopped the root at x=2660, 14 cm short of the door's face (2674), and the player stayed there for the full 3 s. Two of the three jumping runs got the character behind the door, but by going over its top, not through it: when the root crossed the door's plane, the bottom of the root part was at 361\u2013367 cm and the door's top is at 336. The third jumping run was blocked at 2660. Separately, getting over seems to go beyond the game's movement numbers. A single jump lifts the root only about 180 cm (to about 320 in a probe), but with jumps pressed every 0.3 s against the door's face, the root rose to 417\u2013444. So the humanoid seems to get lifted up a 12-stud wall. The probes, episode 1 and episode 2 made no direct changes to the game.",
+   "evidence": [
+    "Episode 2 (trace2.jsonl), walking into the centre (t\u22480.4\u201312.9): door_shut=true, max_x=2660, root held at (2660, 0, 140) in the 'Running' state from 1.9 s to 3.0 s of holding W",
+    "Episode 2, left edge (t\u224813.2\u201319.2): max_x=2660 at y=-99, blocked; right edge (t\u224819.6): max_x=2660 at y=107, blocked",
+    "Episode 2, jumping into the door at t\u224825.6: crossed with door_shut=true. Track near the door: (2656,-9,340) Freefall, then (2663,-10,389), then (2703,-12,417). Root-part bottom at the door plane was 361 (door top 336), so it went over the top. It ended at x=3473",
+    "Episode 2, jumping at t\u224831.8: the same thing. Root rose 352 \u2192 395 \u2192 444 ('Landed' at x=2727 on top of or past the door); root-part bottom at the plane was 367; over the top"
+   ],
+   "seconds": 309,
+   "implementer_seconds": 298.7,
+   "episodes": 2,
+   "cost_usd": 1.4205588,
+   "tokens": null,
+   "turns": 24,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-09/F"
+  }
+ ]
+}

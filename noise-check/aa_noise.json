@@ -1,0 +1,120 @@
+{
+ "cost_usd": {
+  "total": 68.07,
+  "per_run": [
+   5.9502,
+   5.1575,
+   6.8544,
+   7.4729,
+   6.6578,
+   7.6194,
+   6.6934,
+   7.9885,
+   7.3641,
+   6.3105
+  ]
+ },
+ "errors": {},
+ "runs": 10,
+ "prompts_scored": 6,
+ "baseline_runs": 3,
+ "min_gain": 0.02,
+ "per_run": [
+  {
+   "rate": 1.0,
+   "seconds": 933.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1001.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1390.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1581.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1245.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1310.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1203.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1315.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1309.0,
+   "tokens": 0
+  },
+  {
+   "rate": 1.0,
+   "seconds": 1106.0,
+   "tokens": 0
+  }
+ ],
+ "pass_rate": {
+  "min": 1.0,
+  "max": 1.0,
+  "spread_all_runs": 0.0
+ },
+ "noise_floor_with_baseline_runs": {
+  "mean": 0.0,
+  "min": 0.0,
+  "max": 0.0,
+  "subsets": 120
+ },
+ "flipping_prompts": {},
+ "per_prompt": {
+  "A": "10/10",
+  "B": "10/10",
+  "C": "10/10",
+  "D": "10/10",
+  "E": "10/10",
+  "F": "10/10"
+ },
+ "false_keeps": {
+  "plain": {
+   "draws": 5000,
+   "false_keeps": 2133,
+   "rate": 0.4266,
+   "by": {
+    "time": 2133
+   }
+  },
+  "noise": {
+   "draws": 5000,
+   "false_keeps": 751,
+   "rate": 0.1502,
+   "by": {
+    "time": 751
+   }
+  },
+  "noise+confirm": {
+   "draws": 5000,
+   "false_keeps": 252,
+   "rate": 0.0504,
+   "by": {
+    "time": 252
+   }
+  }
+ }
+}

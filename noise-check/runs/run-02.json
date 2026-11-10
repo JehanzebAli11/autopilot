@@ -1,0 +1,139 @@
+{
+ "project": "examples/roblox_testplace",
+ "score": 6,
+ "total": 6,
+ "results": [
+  {
+   "id": "A",
+   "prompt": "Verify that pulling the lever opens the door",
+   "expected": "CONFIRMED",
+   "got": "CONFIRMED",
+   "correct": true,
+   "summary": "Pulling the lever opens the door. In episode 2 (which continued episode 1 without restarting the level), the agent walked round the obby to the lever and held E on its \"Pull\" prompt. The server set the lever's Pulled attribute to true. One second later the door's Open attribute was true, its CanCollide was false and its Transparency was 0.8. The agent then walked through the doorway to the far side. In episode 1, the straight walk to the lever got stuck twice in the obby's checkpoint platforms. That was a problem with the harness's route, not with the game. The game logged no errors in either episode.",
+   "evidence": [
+    "trace2.jsonl t=8.0-11.1: Jev chose pull_lever (picked from go_to_lever, pull_lever and look_at_door). Server Lever.Pulled went false -> true at game time 69.43.",
+    "trace2.jsonl, recorded 1.0 s after the pull: door_open_after=true, door_can_collide_after=false, door_transparency_after=0.8. Before the pull it was Open=false, CanCollide=true, Transparency=0.",
+    "trace2.jsonl t=11.1-15.5: Jev chose walk_through_door and the player crossed the door plane (kit x > 2748) while the door was open. Status was done with passed_through_open_door=true.",
+    "Decisions in the episodes: Jev made 15 in episode 2 (each among 3 options) and 36 in episode 1."
+   ],
+   "seconds": 176,
+   "implementer_seconds": 166.5,
+   "episodes": 2,
+   "cost_usd": 0.9458396,
+   "tokens": null,
+   "turns": 16,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/A"
+  },
+  {
+   "id": "B",
+   "prompt": "Collect the coin",
+   "expected": "achieved",
+   "got": "achieved",
+   "correct": true,
+   "summary": "The agent collected the coin in episode 1. Jev picked approach_coin, then switched to collect_coin. The player walked onto Workspace/Coin, the server's touch handler raised leaderstats.Coins from 0 to 1 and removed the coin, and the episode ended as done at t=4.6 s. Jev made 9 decisions, each with 3 options to choose from (collect_coin, approach_coin, face_coin). The game logged no errors during the episode. Direct changes: none in the episode. In the one research probe before it, the agent walked to the coin with the player's own inputs and collected it; the level restarted before the episode, so that probe's pickup did not carry over.",
+   "evidence": [
+    "trace1.jsonl: t=0.3 approach_coin (p=0.57), arrived at 1.7 s; t=2.2 approach_coin again, then switched at t=2.7 to collect_coin (p=0.86), arrived at 1.92 s",
+    "trace1.jsonl t=4.6: status done, evidence {coins: 1, coin_present: false, player_at: [308, 433, 140]}. The coin was at kit (280, 392, 56); the start was (0, 0, 140), coins 0",
+    "Game.server.luau watchCoin: touching the coin adds its Value (1) to leaderstats.Coins and destroys the coin; this matches what was seen",
+    "The game's error log: no errors during episode 1"
+   ],
+   "seconds": 66,
+   "implementer_seconds": 54.2,
+   "episodes": 1,
+   "cost_usd": 0.8639788000000002,
+   "tokens": null,
+   "turns": 9,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/B"
+  },
+  {
+   "id": "C",
+   "prompt": "Verify that picking up the coin adds 2 to the player's coin count",
+   "expected": "DENIED",
+   "got": "DENIED",
+   "correct": true,
+   "summary": "The agent walked into the level's only coin (Workspace/Coin, tag Coin) using movement keys. The server destroyed the coin, and the player's leaderstats.Coins went from 0 to 1, a gain of 1, not 2. The HUD changed from \"Coins: 0\" to \"Coins: 1\". This matches the code: watchCoin adds the coin's \"Value\" attribute, which Config.Coin.value sets to 1. Jev made 7 decisions among 3 options.",
+   "evidence": [
+    "Episode 1 (runs/20261110-131150/trace1.jsonl): at t=0.4, Coins=0, HUD 'Coins: 0', coin in the level 482 cm away",
+    "t=0.8: Jev picked walk_into_coin (p=0.99). It arrived at t\u22482.8, and the coin was gone at t=3.0 (step take_coin done)",
+    "t=4.7, after waiting 1.5 s for the count to settle: Coins=1, HUD 'Coins: 1', coins_gained=1. Status evidence: coins_at_start 0, coins_now 1, coin_value_attribute 1",
+    "Pre-episode probe: Workspace/Coin attribute Value=1 on the server; Coins=0 on both server and client"
+   ],
+   "seconds": 64,
+   "implementer_seconds": 52.2,
+   "episodes": 1,
+   "cost_usd": 0.6872958000000001,
+   "tokens": null,
+   "turns": 10,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/C"
+  },
+  {
+   "id": "D",
+   "prompt": "Reach the final checkpoint of the obby",
+   "expected": "achieved",
+   "got": "achieved",
+   "correct": true,
+   "summary": "In episode 1, Jev reached the obby's final checkpoint (stage 3 of 3) in 15.2 s of play, making 19 decisions. It walked toward checkpoint 1 and then jumped onto it with the kit's jump_to. From checkpoint 1 it took the run-up jump to checkpoint 2. From checkpoint 2 it ran up and jumped over the lava gap to checkpoint 3. The server's leaderstats Stage reached 3 and the HUD showed \"You finished the obby!\". The kit's jump_to fails for the last gap: it backs up for a run-up and falls off checkpoint 2. So the harness has its own run-up jump: walk to the rear of the platform, hold W, and press jump 52 cm before the edge. No episode made any direct change. The game logged no errors during the episode.",
+   "evidence": [
+    "trace1.jsonl: status done at t=15.2s, evidence {stage: 3, hud_message: 'You finished the obby!', at: [1512, -21, 350]}. The player was standing on checkpoint 3 (Workspace/Obby/Checkpoint@1, Stage attribute 3 = Config.FinalStage)",
+    "Plan in episode 1: stage_1 done at t=9.7s, stage_2 at t=13.1s, stage_3 at t=15.2s",
+    "Timeline: walk_toward_next_checkpoint (t=0.4), jump_onto_next_checkpoint (t=4.9, landed on cp1), run_up_jump_to_next_checkpoint (t=10.2, landed on cp2), run_up_jump_to_next_checkpoint (t=13.6, landed on cp3 over the lava)",
+    "Jev chose among 2 options at each decision point (19 answers)"
+   ],
+   "seconds": 180,
+   "implementer_seconds": 168.5,
+   "episodes": 1,
+   "cost_usd": 0.7028129999999999,
+   "tokens": null,
+   "turns": 19,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/D"
+  },
+  {
+   "id": "E",
+   "prompt": "Verify that touching the lava sends the player back to their last checkpoint",
+   "expected": "CONFIRMED",
+   "got": "CONFIRMED",
+   "correct": true,
+   "summary": "Touching the lava killed the player, and it came back on its last checkpoint every time. In episode 2, Jev took the player to checkpoint 1 (stage 1) and walked into the lava, going round checkpoint 2's platform so the stage stayed at 1. The player died and respawned on checkpoint 1 about 6.5 s later. Jev then jumped to checkpoint 2 (stage 2) and touched the lava again; the player died and respawned on checkpoint 2. In episode 1 the player was at stage 2 and touched the lava 13 times. Every respawn landed on checkpoint 2, about 1120 cm (40 studs) from the Start spawn. The respawn checks the stage it has on arrival: the server code (Game.server.luau) moves the new character onto the checkpoint for its leaderstats Stage. No direct changes were made in any episode.",
+   "evidence": [
+    "Episode 2 (trace2.jsonl), trial 1: died at t=9.4 s at stage 1 at kit (1285,257,119), inside the lava strip. Respawned at t=15.9 s at (672,0,182): 0 cm in 2D from checkpoint 1's centre (672,0) and 672 cm from Start. Stage after: 1.",
+    "Episode 2, trial 2: died at t=24.0 s at stage 2 at (1310,115,140), inside the lava strip. Respawned at about t=30.7 s on checkpoint 2. The status check passed: 'lava deaths at stage 1 and 2 both respawned at that checkpoint'.",
+    "Episode 1 (trace1.jsonl): 13 lava deaths at stage 2. Each respawn was at (1120,0,266), 0 cm in 2D from checkpoint 2 and 1120 cm from Start (first: died at t=7.9 s at (1292,0,140), respawned at t=14.4 s).",
+    "Probe (research, with no direct changes, only walking): walked to checkpoint 1 (stage 1), then into the lava. Health went to 0 and the player respawned at (672,0,182) on checkpoint 1."
+   ],
+   "seconds": 323,
+   "implementer_seconds": 310.3,
+   "episodes": 2,
+   "cost_usd": 1.1286072000000003,
+   "tokens": null,
+   "turns": 19,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/E"
+  },
+  {
+   "id": "F",
+   "prompt": "Verify that the door can be walked through while it is shut",
+   "expected": "DENIED",
+   "got": "DENIED",
+   "correct": true,
+   "summary": "The shut door could not be walked through. Jev picked 4 approaches to the shut door, in order: the centre, the left part, the right part, and running at it while jumping. Each time, the player's root stopped at kit x\u22482660, about 12\u201314 cm in front of the door's near face (the far face is at x=2702). The door stayed shut the whole time (server Open=false, CanCollide=true). The player never got past it. Jumping can't clear it either: the jump lifts the player about 178 cm and the door is 336 cm tall. The game logged no errors. One caveat: the door stands on its own with no walls beside it, so a player can walk around it. That is not walking through it, and the harness only counted crossing the door's own plane within its width.",
+   "evidence": [
+    "Episode 1 (runs/20261110-132117/trace1.jsonl), status done at t=38.8 s. Jev made 35 decisions among 4 options.",
+    "push_through_center (t=0.2\u201316.5): furthest root x 2661.6. door_shut=true, CanCollide=true. Ended at (2660,16,140).",
+    "push_through_left_part (t=16.7\u201324.3): furthest x 2660.5 at y\u2248-132. The door was shut. The option was cut short when Jev switched, after its push had been recorded.",
+    "push_through_right_part (t=24.3\u201332.0): furthest x 2660.3 at y\u2248121. The door was shut."
+   ],
+   "seconds": 192,
+   "implementer_seconds": 181.5,
+   "episodes": 1,
+   "cost_usd": 0.8289993999999999,
+   "tokens": null,
+   "turns": 13,
+   "agent": "claude",
+   "dir": "bench/results/noise/run-02/F"
+  }
+ ]
+}
