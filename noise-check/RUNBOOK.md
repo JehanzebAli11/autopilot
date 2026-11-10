@@ -20,13 +20,16 @@
 1. **Change no Autopilot code** (`autopilot/`, `plugin/`, `bench/run_autopilot.py`). This measures the code as it is.
 2. **Push only to the fork (`origin`).** Never push to `up` (`ramenvr/autopilot`), never open a PR, never force-push.
 3. **Spend:**
-   - The agent bills the Anthropic key in this repo's `.env`, and Jev bills the TypeSafe key.
+   - **The agent runs on the owner's Claude subscription**, not the API. Use `AUTOPILOT_AGENT=claude` (Claude Code through its SDK), and keep **no** `ANTHROPIC_API_KEY` in `.env`, so Claude Code uses its own login. Jev bills the TypeSafe key.
+   - With the subscription, a run's `cost_usd` is the SDK's estimate of the cost, not money spent. The real spend is Jev's; check it in the TypeSafe console.
+   - Subscription usage limits apply. A prompt that fails because of a usage limit is an infrastructure failure (step 4): wait for the limit to reset, then re-run.
    - **Stop after the smoke run** and show the owner the projected cost of 10 runs.
    - Don't start the 10 runs without the owner's "go" and a cost cap.
    - Stop if the running total passes that cap.
 4. **Keys:**
    - Never print, echo or commit `.env`, and never `export` keys in the shell.
-   - Never read `.env` beyond checking that the two key names exist: `grep -c '^TYPESAFE_API_KEY=.\+' .env` and the same for `ANTHROPIC_API_KEY`.
+   - Never read `.env` beyond checking key names: `grep -c '^TYPESAFE_API_KEY=.\+' .env` must print 1, and `grep -c '^ANTHROPIC_API_KEY=.\+' .env` must print 0.
+   - Also check that no `ANTHROPIC_API_KEY` is set in the shell (`[ -z "$ANTHROPIC_API_KEY" ] && echo ok`).
 5. **Numbers only from files:**
    - every number you report comes from `noise-check/aa_noise.json` or the runs' `summary.json`;
    - the script's self-test numbers are synthetic and are never reported.
@@ -38,8 +41,10 @@
 ```bash
 export AUTOPILOT_ENGINE=roblox-mcp   # play through Studio's MCP server
 export AUTOPILOT_SHARE=0             # never send run data anywhere
-export AUTOPILOT_FAST=0              # Opus fast mode doubles the price; off for this test
-# AUTOPILOT_MODEL: leave unset (the default, claude-opus-5-5) unless the owner chooses claude-sonnet-5-5 for cost
+export AUTOPILOT_AGENT=claude        # Claude Code, on the owner's subscription (no ANTHROPIC_API_KEY anywhere)
+export AUTOPILOT_FAST=0              # Opus fast mode uses limits twice as fast; off for this test
+# AUTOPILOT_MODEL: leave unset (the default, claude-opus-5-5) unless the owner chooses claude-sonnet-5-5
+# With no Anthropic key, describe_frames (the vision model) is unavailable. That's the same for all 10 runs; note it.
 SUITE=bench/suites/roblox_testplace.json
 ONLY=A,B,C,D,E,F                     # the 6 scored prompts; G (explore) has no answer to score and costs the most
 MINUTES=15
@@ -49,7 +54,7 @@ Write these into `noise-check/SETTINGS.md` exactly as used, together with:
 - the staging commit (`git rev-parse up/staging`);
 - the Studio version;
 - `AUTOPILOT_JEV_MODEL`, if it's set;
-- the agent (`AUTOPILOT_AGENT`, default `opencode`).
+- the agent (`claude`, on the subscription) and that vision was unavailable.
 
 ## Steps
 
@@ -57,8 +62,8 @@ Write these into `noise-check/SETTINGS.md` exactly as used, together with:
 
 - `git status` shows branch `noise-check`, clean except `bench/results/` (git-ignored).
 - Python: `uv venv && uv pip install -e ".[dev]"`. Then `pytest -q tests/test_evolve.py` passes.
-- Bun is installed (`bun --version`), because the default OpenCode agent runs under it.
-- `.env` has both key names (rule 4). On macOS, Aura is signed out (the bench's docstring explains why).
+- Claude Code is installed and logged in to the owner's subscription (`claude --version`; the owner confirms that `/status` shows the subscription, not an API key).
+- `.env` has the TypeSafe key and no Anthropic key (rule 4). On macOS, Aura is signed out (the bench's docstring explains why).
 - `python tools/aa_noise.py --help` works.
 - Self-test the script on fake runs (synthetic, never reported). Make 6 folders, each with a `summary.json` like `{"results":[{"id":"A","correct":true,"seconds":100,"tokens":1000,"cost_usd":0.1}, ...]}`, run the script on them, and check that it writes `aa_noise.md` and the two PNGs. Delete the fake folders afterwards.
 
@@ -86,8 +91,9 @@ Check:
 Then **stop and report to the owner**:
 - what happened;
 - the cost of prompt A;
-- a projection of 10 runs × 6 prompts, taking A's cost × 60 with a ±50% range because prompts differ;
-- a recommendation: Opus, or Sonnet if the projection is over about $40.
+- a projection of 10 runs × 6 prompts: Jev's spend, A's × 60 with a ±50% range because prompts differ, plus the agent's minutes against the subscription;
+- a recommendation: Opus, or Sonnet if Opus looks likely to hit the subscription's usage limits overnight;
+- confirmation that the run used the subscription: the report's `agent` is `claude`, and no API usage appears.
 
 Wait for "go", a cost cap and the model choice.
 
