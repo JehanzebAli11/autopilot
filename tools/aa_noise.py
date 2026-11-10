@@ -100,7 +100,11 @@ def main(argv=None):
                 why[reason(w)] = why.get(reason(w), 0) + 1
         rules[rule] = {"draws": len(draws), "false_keeps": keeps, "rate": round(keeps / len(draws), 4), "by": why}
 
+    costs = [round(sum(float(x.get("cost_usd") or 0) for x in r), 4) for r in runs]
+    errors = {f"run {k + 1}": [x["id"] for x in r if x.get("got") == "ERROR"] for k, r in enumerate(runs)}
     report = {
+        "cost_usd": {"total": round(sum(costs), 2), "per_run": costs},
+        "errors": {k: v for k, v in errors.items() if v},
         "runs": n, "prompts_scored": len(scored_ids), "baseline_runs": a.baseline, "min_gain": MIN_GAIN,
         "per_run": per_run,
         "pass_rate": {"min": min(rates), "max": max(rates), "spread_all_runs": round(max(rates) - min(rates), 4)},
@@ -120,6 +124,8 @@ def main(argv=None):
           f"- Noise floor evolve measures from {a.baseline} runs: mean {pct(report['noise_floor_with_baseline_runs']['mean'])}"
           f" (range {pct(min(floors))} to {pct(max(floors))} over {len(floors)} subsets).",
           f"- Prompts that flip between runs: {', '.join(f'{i} ({report['flipping_prompts'][i]})' for i in flips) or 'none'}.",
+          f"- Agent cost (the runs' own cost_usd): ${sum(costs):.2f} in all."
+          + (f" Prompts that ended in ERROR: {report['errors']}." if report["errors"] else ""),
           "", "| rule | draws | false keeps | rate | kept for |", "| --- | --- | --- | --- | --- |"]
     names = {"plain": "plain autoresearch (no noise floor, no confirm)", "noise": f"noise floor ({a.baseline} runs)",
              "noise+confirm": f"noise floor + confirm (evolve's default)"}
