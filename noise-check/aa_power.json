@@ -1,0 +1,149 @@
+{
+ "runs": 10,
+ "baseline_runs": 3,
+ "t_test_candidate_runs": 3,
+ "alpha": 0.05,
+ "tests": "one-sided Student (pooled) and Welch t-tests on suite seconds; pass rate must not fall",
+ "min_gain": 0.02,
+ "seed": 0,
+ "suite_seconds": [
+  933.0,
+  1001.0,
+  1390.0,
+  1581.0,
+  1245.0,
+  1310.0,
+  1203.0,
+  1315.0,
+  1309.0,
+  1106.0
+ ],
+ "results": [
+  {
+   "speedup": 0.0,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 252,
+    "rate": 0.0504
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 185,
+    "rate": 0.044
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 157,
+    "rate": 0.0374
+   }
+  },
+  {
+   "speedup": 0.1,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 476,
+    "rate": 0.0952
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 712,
+    "rate": 0.1695
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 624,
+    "rate": 0.1486
+   }
+  },
+  {
+   "speedup": 0.2,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 1087,
+    "rate": 0.2174
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 1496,
+    "rate": 0.3562
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 1293,
+    "rate": 0.3079
+   }
+  },
+  {
+   "speedup": 0.3,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 2015,
+    "rate": 0.403
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 2935,
+    "rate": 0.6988
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 2470,
+    "rate": 0.5881
+   }
+  },
+  {
+   "speedup": 0.35,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 2468,
+    "rate": 0.4936
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 3631,
+    "rate": 0.8645
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 3168,
+    "rate": 0.7543
+   }
+  },
+  {
+   "speedup": 0.4,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 3144,
+    "rate": 0.6288
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 4078,
+    "rate": 0.971
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 3795,
+    "rate": 0.9036
+   }
+  },
+  {
+   "speedup": 0.5,
+   "evolve_default": {
+    "draws": 5000,
+    "keeps": 4374,
+    "rate": 0.8748
+   },
+   "t_test_student": {
+    "draws": 4200,
+    "keeps": 4200,
+    "rate": 1.0
+   },
+   "t_test_welch": {
+    "draws": 4200,
+    "keeps": 4152,
+    "rate": 0.9886
+   }
+  }
+ ]
+}
